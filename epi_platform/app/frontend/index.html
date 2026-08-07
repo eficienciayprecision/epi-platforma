@@ -1,0 +1,664 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>EPi — Asistente IA | Eficiencia y Precisión Industrial</title>
+  <style>
+    :root {
+      --navy: #0B1D36;
+      --gold: #C9A227;
+      --bg: #f4f6f8;
+      --white: #fff;
+      --gray: #5a5a5a;
+      --border: #e2e6eb;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      background: var(--bg); color: #222; min-height: 100vh;
+    }
+    header {
+      background: var(--navy); color: white; padding: 14px 24px;
+      display: flex; align-items: center; justify-content: space-between;
+      border-bottom: 3px solid var(--gold);
+    }
+    header h1 { font-size: 1.1rem; font-weight: 600; letter-spacing: 0.02em; }
+    header .sub { font-size: 0.75rem; opacity: 0.7; }
+    .layout {
+      max-width: 1100px; margin: 20px auto; padding: 0 16px;
+      display: grid; grid-template-columns: 1fr 320px; gap: 16px;
+    }
+    @media (max-width: 800px) { .layout { grid-template-columns: 1fr; } }
+    .card {
+      background: var(--white); border-radius: 10px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.06); padding: 16px;
+    }
+    .card h2 {
+      font-size: 0.95rem; color: var(--navy); margin-bottom: 12px;
+      border-bottom: 2px solid var(--gold); padding-bottom: 6px; display: inline-block;
+    }
+    #chat {
+      height: 380px; overflow-y: auto; border: 1px solid var(--border);
+      border-radius: 8px; padding: 12px; background: #fafbfc; margin-bottom: 12px;
+    }
+    .msg { margin-bottom: 10px; max-width: 90%; }
+    .msg.bot { color: var(--navy); }
+    .msg.user { margin-left: auto; text-align: right; }
+    .msg .bubble {
+      display: inline-block; padding: 8px 12px; border-radius: 12px;
+      font-size: 0.9rem; line-height: 1.4;
+    }
+    .msg.bot .bubble { background: #eef2f7; }
+    .msg.user .bubble { background: var(--navy); color: white; }
+    .input-row { display: flex; gap: 8px; }
+    .input-row input {
+      flex: 1; padding: 10px 12px; border: 1px solid var(--border);
+      border-radius: 8px; font-size: 0.9rem;
+    }
+    button {
+      background: var(--navy); color: white; border: none; border-radius: 8px;
+      padding: 10px 16px; cursor: pointer; font-size: 0.85rem; font-weight: 600;
+    }
+    button:hover { opacity: 0.9; }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+    button.gold { background: var(--gold); color: var(--navy); }
+    button.outline { background: white; color: var(--navy); border: 1px solid var(--navy); }
+    .contact-box label { display: block; font-size: 0.8rem; color: var(--gray); margin-top: 8px; }
+    .contact-box input {
+      width: 100%; padding: 8px; border: 1px solid var(--border);
+      border-radius: 6px; margin-top: 4px;
+    }
+    .contact-box .hint { font-size: 0.72rem; color: var(--gray); margin-top: 10px; }
+    .status { font-size: 0.75rem; color: var(--gray); margin-top: 8px; }
+    .status.ok { color: #1a7a3a; }
+    .status.err { color: #a02020; }
+    .profile-group { display: flex; flex-direction: column; gap: 6px; margin: 10px 0; }
+    .profile-group label {
+      display: flex; align-items: center; gap: 8px; font-size: 0.85rem;
+      padding: 8px; border: 1px solid var(--border); border-radius: 6px; cursor: pointer;
+    }
+    .profile-group label:has(input:checked) { border-color: var(--gold); background: #fffbeb; }
+    #result { display: none; margin-top: 12px; font-size: 0.85rem; }
+    #result .price { font-size: 1.4rem; font-weight: 700; color: var(--navy); margin: 8px 0; }
+    .actions { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; }
+    .badge {
+      display: inline-block; background: var(--gold); color: var(--navy);
+      font-size: 0.7rem; font-weight: 700; padding: 2px 8px; border-radius: 4px;
+    }
+    .menu-options { display: flex; flex-direction: column; gap: 10px; margin-top: 6px; }
+    .menu-btn {
+      background: white; color: var(--navy); border: 1px solid var(--border);
+      border-radius: 8px; padding: 14px; text-align: left; font-size: 0.9rem;
+      font-weight: 600; cursor: pointer; line-height: 1.35;
+    }
+    .menu-btn:hover { border-color: var(--gold); background: #fffbeb; }
+    .menu-btn .desc { display: block; font-weight: 400; font-size: 0.78rem; color: var(--gray); margin-top: 4px; }
+    .mode-badge {
+      display: inline-block; font-size: 0.72rem; color: var(--gray);
+      border: 1px solid var(--border); border-radius: 6px; padding: 2px 8px; margin-bottom: 10px;
+    }
+    #changeModeBtn { font-size: 0.72rem; padding: 4px 8px; margin-left: 6px; }
+
+    /* NUEVO — footer legal */
+    footer {
+      max-width: 1100px; margin: 8px auto 24px; padding: 0 16px;
+      font-size: 0.75rem; color: var(--gray); text-align: center;
+    }
+    footer a { color: var(--gray); }
+
+    /* NUEVO — banner de cookies (LSSI-CE) */
+    #cookieBanner {
+      position: fixed; left: 0; right: 0; bottom: 0; z-index: 1000;
+      background: var(--navy); color: white; padding: 16px 20px;
+      display: none; box-shadow: 0 -2px 10px rgba(0,0,0,0.2);
+    }
+    #cookieBanner .inner {
+      max-width: 1100px; margin: 0 auto; display: flex; flex-wrap: wrap;
+      align-items: center; justify-content: space-between; gap: 12px;
+    }
+    #cookieBanner p { font-size: 0.82rem; line-height: 1.4; margin: 0; max-width: 640px; }
+    #cookieBanner p a { color: var(--gold); }
+    #cookieBanner .cookie-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+    #cookieBanner button {
+      font-size: 0.78rem; padding: 8px 14px; border-radius: 6px; cursor: pointer;
+    }
+    #cookieBanner .outline {
+      background: transparent; border: 1px solid rgba(255,255,255,0.4); color: white;
+    }
+    #cookiePrefs {
+      max-width: 420px; margin: 10px auto 0; background: white; color: #222;
+      border-radius: 8px; padding: 14px; display: none;
+    }
+    #cookiePrefs label { display: flex; align-items: center; gap: 8px; font-size: 0.82rem; margin: 6px 0; }
+  </style>
+</head>
+<body>
+  <header>
+    <div>
+      <h1>EPi — Asistente de IA</h1>
+      <div class="sub">Eficiencia y Precisión Industrial S.L. · Bilbao</div>
+    </div>
+    <div id="userBadge" class="sub">Consulta abierta — sin registro</div>
+  </header>
+
+  <div class="layout">
+    <!-- Chat -->
+    <div class="card">
+      <h2 id="chatTitle">¿Qué necesitas?</h2>
+
+      <!-- Menu inicial: se muestra antes de elegir modo -->
+      <div id="menuOptions" class="menu-options">
+        <button class="menu-btn" data-mode="interview">
+          Mejorar mi instalación
+          <span class="desc">Dimensionar o sustituir una bomba: entrevista técnica y presupuesto automático.</span>
+        </button>
+        <button class="menu-btn" data-mode="efficiency">
+          Mejorar la eficiencia de mi planta
+          <span class="desc">Describe tu instalación actual y EPi te indica cómo reducir el consumo energético.</span>
+        </button>
+        <button class="menu-btn" data-mode="adhesive">
+          Tengo una instalación de adhesivo que deseo mejorar
+          <span class="desc">Dosificación y aplicación de adhesivo de uno o dos componentes.</span>
+        </button>
+        <button class="menu-btn" data-mode="photo">
+          Trabajar a partir de una foto <span class="badge" style="margin-left:6px">BETA</span>
+          <span class="desc">Sube una foto y EPi te preguntará si quieres una oferta de un elemento suelto o mejorar toda la instalación.</span>
+        </button>
+      </div>
+
+      <!-- NUEVO: pregunta previa del modo foto -->
+      <div id="photoChoice" style="display:none">
+        <span class="mode-badge">Trabajar a partir de una foto</span>
+        <button id="changeModeBtnPhotoChoice" class="outline" style="margin-left:6px">← Elegir otra opción</button>
+        <p style="margin-top:14px;font-size:0.9rem;color:var(--navy)">¿Qué quieres hacer?</p>
+        <div class="menu-options" style="margin-top:8px">
+          <button class="menu-btn" id="choiceItemsBtn">
+            Ofertar los elementos que aparecen en la foto
+            <span class="desc">EPi identifica un elemento suelto (válvula, bomba, sensor...) y te ofrece un presupuesto solo de ese elemento.</span>
+          </button>
+          <button class="menu-btn" id="choiceRedesignBtn">
+            Mejorar/rediseñar toda la instalación <span class="badge" style="margin-left:6px">BETA</span>
+            <span class="desc">Sube una foto de la instalación completa y un objeto de referencia para calcular la escala.</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- NUEVO: identificar y ofertar UN elemento suelto -->
+      <div id="photoItemArea" style="display:none">
+        <span class="mode-badge">Ofertar elemento de la foto</span>
+        <button id="changeModeBtnPhotoItem" class="outline" style="margin-left:6px">← Elegir otra opción</button>
+        <div style="margin-top:12px">
+          <label style="display:block;font-size:0.8rem;color:var(--gray);margin-bottom:4px">Foto del elemento</label>
+          <input id="photoItemFile" type="file" accept="image/*" style="width:100%" />
+        </div>
+        <button id="identifyItemBtn" class="gold" style="margin-top:12px">Analizar foto</button>
+        <div id="photoItemIdentify" style="margin-top:12px;font-size:0.85rem"></div>
+
+        <div id="photoItemConfirm" style="display:none;margin-top:12px">
+          <label style="display:block;font-size:0.8rem;color:var(--gray);margin-bottom:4px">Elemento (corrígelo si hace falta)</label>
+          <input id="itemNameInput" type="text" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px" />
+          <label style="display:block;font-size:0.8rem;color:var(--gray);margin:10px 0 4px">Cantidad</label>
+          <input id="itemQtyInput" type="number" value="1" min="0.01" step="0.01" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px" />
+          <button id="quoteItemBtn" class="gold" style="margin-top:12px">Pedir oferta de este elemento</button>
+        </div>
+        <div id="photoItemResult" style="margin-top:12px;font-size:0.85rem"></div>
+      </div>
+
+      <!-- Formulario de foto: rediseño de instalación completa -->
+      <div id="photoArea" style="display:none">
+        <span class="mode-badge">Rediseño por foto (beta — vista previa de concepto)</span>
+        <button id="changeModeBtnPhoto" class="outline" style="margin-left:6px">← Elegir otra opción</button>
+        <div style="margin-top:12px">
+          <label style="display:block;font-size:0.8rem;color:var(--gray);margin-bottom:4px">Foto de la instalación</label>
+          <input id="photoFile" type="file" accept="image/*" style="width:100%" />
+        </div>
+        <div style="margin-top:10px">
+          <label style="display:block;font-size:0.8rem;color:var(--gray);margin-bottom:4px">Objeto de referencia visible en la foto (para calcular la escala)</label>
+          <input id="refObject" type="text" placeholder="Ej: moneda de 1 euro" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px" />
+        </div>
+        <div style="margin-top:10px">
+          <label style="display:block;font-size:0.8rem;color:var(--gray);margin-bottom:4px">Tamaño real de ese objeto (mm)</label>
+          <input id="refLength" type="number" placeholder="Ej: 23.25" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px" />
+        </div>
+        <button id="sendPhotoBtn" class="gold" style="margin-top:12px">Analizar foto</button>
+        <div id="photoResult" style="margin-top:12px;font-size:0.85rem"></div>
+      </div>
+
+      <!-- Chat: oculto hasta que se elige un modo -->
+      <div id="chatArea" style="display:none">
+        <span class="mode-badge" id="modeBadge"></span>
+        <button id="changeModeBtn" class="outline">← Elegir otra opción</button>
+        <div id="chat" style="margin-top:10px"></div>
+        <div class="input-row">
+          <input id="msgInput" type="text" placeholder="Escribe tu respuesta..." />
+          <button id="sendBtn">Enviar</button>
+        </div>
+        <p class="status" id="chatStatus"></p>
+      </div>
+    </div>
+
+    <!-- Panel derecho -->
+    <div>
+      <div class="card contact-box" id="contactCard">
+        <h2>Tus datos (opcional)</h2>
+        <label>Nombre de contacto</label>
+        <input id="contactName" placeholder="Ej: Ana García" />
+        <label>Empresa</label>
+        <input id="companyName" placeholder="Ej: Sosa Bilbao S.L." />
+        <label>Teléfono</label>
+        <input id="phone" placeholder="Ej: 600 000 000" />
+        <label>Email</label>
+        <input id="email" type="email" placeholder="tu@empresa.com" />
+        <p class="hint">Ningún campo es obligatorio. Si dejas tu email, te enviaremos
+          la oferta automáticamente en PDF y la guardaremos a nombre de tu empresa.</p>
+      </div>
+
+      <div class="card" style="margin-top:16px" id="profileCard" hidden>
+        <h2>Perfil de inversión</h2>
+        <div class="profile-group">
+          <label><input type="radio" name="profile" value="BARATA" /> Barata (CAPEX mínimo)</label>
+          <label><input type="radio" name="profile" value="CALIDAD_PRECIO" checked /> <span class="badge">RECOMENDADA</span> Calidad-Precio</label>
+          <label><input type="radio" name="profile" value="PREMIUM" /> Premium (crítica)</label>
+        </div>
+        <div class="actions">
+          <button class="gold" id="goBtn" disabled>Nosotros nos encargamos</button>
+        </div>
+        <div id="result"></div>
+        <p class="status" id="actionStatus"></p>
+      </div>
+    </div>
+  </div>
+
+  <footer>
+    Eficiencia y Precisión Industrial, S.L. · Calle Andrés Eliseo Mañaricua nº 7, Bajo, 48013 Bilbao (Bizkaia) ·
+    <a href="/privacy" target="_blank">Política de Privacidad y Cookies</a> ·
+    <a href="#" id="manageCookiesLink">Configurar cookies</a>
+  </footer>
+
+  <!-- NUEVO — banner de consentimiento de cookies (LSSI-CE / RGPD) -->
+  <div id="cookieBanner">
+    <div class="inner">
+      <p>
+        Usamos cookies técnicas necesarias para el funcionamiento de EPi. Con tu consentimiento, también
+        podríamos usar cookies analíticas para mejorar el servicio. Puedes aceptarlas, rechazarlas o configurarlas.
+        Más información en nuestra <a href="/privacy" target="_blank">Política de Privacidad y Cookies</a>.
+      </p>
+      <div class="cookie-actions">
+        <button class="outline" id="cookieConfigureBtn">Configurar</button>
+        <button class="outline" id="cookieRejectBtn">Rechazar</button>
+        <button class="gold" id="cookieAcceptBtn">Aceptar todas</button>
+      </div>
+    </div>
+    <div id="cookiePrefs">
+      <label><input type="checkbox" checked disabled /> Técnicas / necesarias (siempre activas)</label>
+      <label><input type="checkbox" id="analyticsCookieCheckbox" /> Analíticas</label>
+      <button class="gold" id="cookieSavePrefsBtn" style="margin-top:8px">Guardar preferencias</button>
+    </div>
+  </div>
+
+  <script>
+    const API = window.location.origin;
+    let history = [];
+    let lastData = null;
+    let mode = null; // "interview" | "efficiency" | "adhesive"
+
+    // Configuracion de cada rama del menu inicial.
+    const MODES = {
+      interview: {
+        label: "Mejorar mi instalación",
+        endpoint: "/api/v1/interview/chat",
+        greeting: "Cuéntame los datos de tu instalación (caudal, altura, tubería, fluido...) o escribe 'hola' para empezar.",
+        showProfilePanel: true,
+      },
+      efficiency: {
+        label: "Mejorar la eficiencia de mi planta",
+        endpoint: "/api/v1/efficiency/advise",
+        greeting: "Describe brevemente tu planta: cuántas bombas tienes, qué fluidos mueven, y cualquier detalle que consideres relevante (antigüedad, si usan variador de frecuencia, codos o válvulas que te preocupen...).",
+        showProfilePanel: false,
+      },
+      adhesive: {
+        label: "Instalación de adhesivo",
+        endpoint: "/api/v1/adhesive/chat",
+        greeting: null, // la primera pregunta (1K/2K) la manda el propio backend
+        showProfilePanel: false,
+      },
+    };
+
+    const chat = document.getElementById("chat");
+    const msgInput = document.getElementById("msgInput");
+    const sendBtn = document.getElementById("sendBtn");
+    const goBtn = document.getElementById("goBtn");
+    const menuOptions = document.getElementById("menuOptions");
+    const chatArea = document.getElementById("chatArea");
+    const chatTitle = document.getElementById("chatTitle");
+    const modeBadge = document.getElementById("modeBadge");
+    const profileCard = document.getElementById("profileCard");
+
+    function addMsg(text, who) {
+      const d = document.createElement("div");
+      d.className = "msg " + who;
+      d.innerHTML = '<span class="bubble"></span>';
+      d.querySelector(".bubble").textContent = text;
+      chat.appendChild(d);
+      chat.scrollTop = chat.scrollHeight;
+    }
+
+    function getContact() {
+      const contactName = document.getElementById("contactName").value.trim();
+      const companyName = document.getElementById("companyName").value.trim();
+      const phone = document.getElementById("phone").value.trim();
+      const email = document.getElementById("email").value.trim();
+      const contact = {};
+      if (contactName) contact.contact_name = contactName;
+      if (companyName) contact.company_name = companyName;
+      if (phone) contact.phone = phone;
+      if (email) contact.email = email;
+      return Object.keys(contact).length ? contact : null;
+    }
+
+    async function selectMode(key) {
+      mode = key;
+      const cfg = MODES[key];
+      history = [];
+      lastData = null;
+      chat.innerHTML = "";
+      goBtn.disabled = true;
+      document.getElementById("result").style.display = "none";
+      document.getElementById("actionStatus").textContent = "";
+      document.getElementById("chatStatus").textContent = "";
+
+      menuOptions.style.display = "none";
+      chatArea.style.display = "block";
+      chatTitle.textContent = cfg.label;
+      modeBadge.textContent = cfg.label;
+      profileCard.hidden = !cfg.showProfilePanel;
+
+      if (cfg.greeting) {
+        addMsg(cfg.greeting, "bot");
+      } else {
+        // Modo adhesivo: la primera pregunta la genera el propio backend
+        // (siempre 1K vs 2K) en cuanto detecta el historial vacio.
+        try {
+          const data = await fetchAgentReply("(inicio)");
+          addMsg(data.message, "bot");
+          history.push({ role: "assistant", content: data.message });
+        } catch (e) {
+          addMsg("No se ha podido iniciar la conversación: " + e.message, "bot");
+        }
+      }
+    }
+
+    function backToMenu() {
+      mode = null;
+      history = [];
+      chatArea.style.display = "none";
+      menuOptions.style.display = "flex";
+      chatTitle.textContent = "¿Qué necesitas?";
+    }
+
+    async function fetchAgentReply(userText) {
+      const cfg = MODES[mode];
+      const r = await fetch(API + cfg.endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message: userText, history }),
+      });
+      return r.json();
+    }
+
+    async function sendChat() {
+      const text = msgInput.value.trim();
+      if (!text || !mode) return;
+      addMsg(text, "user");
+      msgInput.value = "";
+      history.push({ role: "user", content: text });
+      document.getElementById("chatStatus").textContent = "Pensando...";
+      try {
+        const data = await fetchAgentReply(text);
+        if (data.status === "incomplete") {
+          addMsg(data.message, "bot");
+          history.push({ role: "assistant", content: data.message });
+          document.getElementById("chatStatus").textContent = "";
+        } else if (data.status === "complete" && mode === "interview") {
+          lastData = data.data;
+          addMsg("Datos completos. Elige perfil y pulsa «Nosotros nos encargamos».", "bot");
+          goBtn.disabled = false;
+          document.getElementById("chatStatus").className = "status ok";
+          document.getElementById("chatStatus").textContent = "Listo para presupuestar";
+        } else if (data.status === "complete" || data.status === "advice") {
+          // Modo adhesivo (complete) o eficiencia (advice): mensaje final/consejo,
+          // sin generar una solucion de bomba con precio.
+          addMsg(data.message, "bot");
+          history.push({ role: "assistant", content: data.message });
+          document.getElementById("chatStatus").className = "status ok";
+          document.getElementById("chatStatus").textContent = "";
+        } else {
+          addMsg(data.message || "Error", "bot");
+        }
+      } catch (e) {
+        document.getElementById("chatStatus").className = "status err";
+        document.getElementById("chatStatus").textContent = e.message;
+      }
+    }
+
+    async function oneshot() {
+      if (!lastData) {
+        document.getElementById("actionStatus").textContent = "Completa la entrevista primero";
+        return;
+      }
+      const profile = document.querySelector('input[name="profile"]:checked').value;
+      const contact = getContact();
+      const st = document.getElementById("actionStatus");
+      st.textContent = "Calculando + generando oferta...";
+      goBtn.disabled = true;
+      try {
+        const r = await fetch(API + "/api/v1/solution/oneshot", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            hydraulics_input: lastData,
+            profile,
+            network_status: "Tuberias Soldadas (Sin Parada)",
+            use_scraper: true,
+            contact,
+          }),
+        });
+        if (!r.ok) {
+          const err = await r.json().catch(() => ({}));
+          throw new Error(err.detail || ("Error " + r.status));
+        }
+        const data = await r.json();
+        window._lastFull = data.solution;
+        const price = data.solution.client_offer.final_price_eur;
+        const pump = data.solution.selected_pump;
+        const box = document.getElementById("result");
+        box.style.display = "block";
+        box.innerHTML =
+          "<div class='price'>" + price.toLocaleString("es-ES", { minimumFractionDigits: 2 }) + " EUR</div>" +
+          "<div>" + pump.brand + " — " + pump.model + "</div>" +
+          "<div>Perfil: " + data.solution.profile_selected + "</div>" +
+          (data.email_sent
+            ? "<div style='margin-top:8px;color:#1a7a3a'>Oferta enviada por email ✓</div>"
+            : "<div style='margin-top:8px'>PDF generado. Descárgalo abajo.</div>") +
+          "<div class='actions'>" +
+          "<button class='outline' onclick='downloadPdf()'>Descargar Oferta Cliente</button>" +
+          "</div>";
+        st.className = "status ok";
+        st.textContent = "Solución lista";
+      } catch (e) {
+        st.className = "status err";
+        st.textContent = e.message;
+      }
+      goBtn.disabled = false;
+    }
+
+    async function downloadPdf() {
+      if (!window._lastFull) return;
+      const r = await fetch(API + "/api/v1/report/client-pdf", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(window._lastFull),
+      });
+      if (!r.ok) { alert("Error descargando PDF (" + r.status + ")."); return; }
+      const blob = await r.blob();
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = "Oferta_Cliente_EPI.pdf";
+      a.click();
+    }
+
+    sendBtn.onclick = sendChat;
+    msgInput.addEventListener("keydown", e => { if (e.key === "Enter") sendChat(); });
+    goBtn.onclick = oneshot;
+
+    // NUEVO — gestion del consentimiento de cookies (LSSI-CE / RGPD)
+    const COOKIE_CONSENT_KEY = "epi_cookie_consent"; // { necessary: true, analytics: bool, date: iso }
+    const cookieBanner = document.getElementById("cookieBanner");
+    const cookiePrefs = document.getElementById("cookiePrefs");
+    const analyticsCheckbox = document.getElementById("analyticsCookieCheckbox");
+
+    function getConsent() {
+      try { return JSON.parse(localStorage.getItem(COOKIE_CONSENT_KEY)); } catch (e) { return null; }
+    }
+    function saveConsent(analytics) {
+      const consent = { necessary: true, analytics: !!analytics, date: new Date().toISOString() };
+      localStorage.setItem(COOKIE_CONSENT_KEY, JSON.stringify(consent));
+      cookieBanner.style.display = "none";
+      cookiePrefs.style.display = "none";
+      // Punto de extension: activar aqui el script analitico solo si consent.analytics === true.
+    }
+    if (!getConsent()) {
+      cookieBanner.style.display = "block";
+    }
+    document.getElementById("cookieAcceptBtn").addEventListener("click", () => saveConsent(true));
+    document.getElementById("cookieRejectBtn").addEventListener("click", () => saveConsent(false));
+    document.getElementById("cookieConfigureBtn").addEventListener("click", () => {
+      cookiePrefs.style.display = cookiePrefs.style.display === "block" ? "none" : "block";
+    });
+    document.getElementById("cookieSavePrefsBtn").addEventListener("click", () => {
+      saveConsent(analyticsCheckbox.checked);
+    });
+    document.getElementById("manageCookiesLink").addEventListener("click", (e) => {
+      e.preventDefault();
+      const existing = getConsent();
+      if (existing) analyticsCheckbox.checked = !!existing.analytics;
+      cookieBanner.style.display = "block";
+      cookiePrefs.style.display = "block";
+    });
+
+    document.querySelectorAll(".menu-btn[data-mode]").forEach(btn => {
+      btn.addEventListener("click", () => {
+        if (btn.dataset.mode === "photo") {
+          menuOptions.style.display = "none";
+          document.getElementById("photoChoice").style.display = "block";
+        } else {
+          selectMode(btn.dataset.mode);
+        }
+      });
+    });
+    document.getElementById("changeModeBtn").addEventListener("click", backToMenu);
+
+    function backToMenuFromPhoto() {
+      document.getElementById("photoChoice").style.display = "none";
+      document.getElementById("photoItemArea").style.display = "none";
+      document.getElementById("photoArea").style.display = "none";
+      menuOptions.style.display = "flex";
+    }
+    document.getElementById("changeModeBtnPhotoChoice").addEventListener("click", backToMenuFromPhoto);
+    document.getElementById("changeModeBtnPhoto").addEventListener("click", backToMenuFromPhoto);
+    document.getElementById("changeModeBtnPhotoItem").addEventListener("click", backToMenuFromPhoto);
+
+    // NUEVO — el cliente elige, dentro del modo foto, si quiere ofertar
+    // solo un elemento o rediseñar toda la instalación.
+    document.getElementById("choiceItemsBtn").addEventListener("click", () => {
+      document.getElementById("photoChoice").style.display = "none";
+      document.getElementById("photoItemArea").style.display = "block";
+    });
+    document.getElementById("choiceRedesignBtn").addEventListener("click", () => {
+      document.getElementById("photoChoice").style.display = "none";
+      document.getElementById("photoArea").style.display = "block";
+    });
+
+    // NUEVO — flujo "ofertar elemento suelto": analizar foto -> confirmar -> ofertar
+    document.getElementById("identifyItemBtn").addEventListener("click", async () => {
+      const fileInput = document.getElementById("photoItemFile");
+      const box = document.getElementById("photoItemIdentify");
+      document.getElementById("photoItemConfirm").style.display = "none";
+      document.getElementById("photoItemResult").textContent = "";
+      if (!fileInput.files.length) {
+        box.textContent = "Añade primero una foto del elemento.";
+        return;
+      }
+      box.textContent = "Analizando...";
+      const form = new FormData();
+      form.append("photo", fileInput.files[0]);
+      try {
+        const r = await fetch(API + "/api/v1/photo/identify-item", { method: "POST", body: form });
+        const data = await r.json();
+        box.textContent = data.suggestion_text;
+        document.getElementById("itemNameInput").value = data.detected_label;
+        document.getElementById("photoItemConfirm").style.display = "block";
+      } catch (e) {
+        box.textContent = "Error: " + e.message;
+      }
+    });
+
+    document.getElementById("quoteItemBtn").addEventListener("click", async () => {
+      const itemName = document.getElementById("itemNameInput").value.trim();
+      const qty = parseFloat(document.getElementById("itemQtyInput").value) || 1;
+      const resultBox = document.getElementById("photoItemResult");
+      if (!itemName) {
+        resultBox.textContent = "Indica qué elemento es antes de pedir oferta.";
+        return;
+      }
+      resultBox.textContent = "Calculando oferta...";
+      try {
+        const r = await fetch(API + "/api/v1/photo/quote-item", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            item_name: itemName, quantity: qty, use_scraper: true, contact: getContact(),
+          }),
+        });
+        if (!r.ok) {
+          const err = await r.json().catch(() => ({}));
+          throw new Error(err.detail || ("Error " + r.status));
+        }
+        const data = await r.json();
+        const price = data.solution.client_offer.final_price_eur;
+        resultBox.innerHTML =
+          "<div class='price'>" + price.toLocaleString("es-ES", { minimumFractionDigits: 2 }) + " EUR</div>" +
+          (data.email_sent
+            ? "<div style='margin-top:8px;color:#1a7a3a'>Oferta enviada por email ✓</div>"
+            : "<div style='margin-top:8px'>Oferta generada.</div>");
+      } catch (e) {
+        resultBox.textContent = "Error: " + e.message;
+      }
+    });
+
+    document.getElementById("sendPhotoBtn").addEventListener("click", async () => {
+      const fileInput = document.getElementById("photoFile");
+      const refObject = document.getElementById("refObject").value.trim();
+      const refLength = document.getElementById("refLength").value.trim();
+      const resultBox = document.getElementById("photoResult");
+      if (!fileInput.files.length || !refObject || !refLength) {
+        resultBox.textContent = "Añade la foto, el objeto de referencia y su tamaño en mm.";
+        return;
+      }
+      resultBox.textContent = "Analizando...";
+      const form = new FormData();
+      form.append("photo", fileInput.files[0]);
+      form.append("reference_object", refObject);
+      form.append("reference_length_mm", refLength);
+      try {
+        const r = await fetch(API + "/api/v1/photo/redesign", { method: "POST", body: form });
+        const data = await r.json();
+        resultBox.innerHTML = "<span class='badge'>VISTA PREVIA DE CONCEPTO</span><p style='margin-top:8px'>" + data.message + "</p>";
+      } catch (e) {
+        resultBox.textContent = "Error: " + e.message;
+      }
+    });
+  </script>
+</body>
+</html>
