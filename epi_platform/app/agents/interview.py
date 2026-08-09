@@ -114,25 +114,33 @@ class InterviewAgent:
         if m:
             extracted["flow_m3h"] = float(m.group(1))
         else:
-            m = re.search(r"(\d+\.?\d*)\s*(l/min|lpm)", up)
+            m = re.search(r"(\d+\.?\d*)\s*(l/min|l/m\b|lpm|lts?/min|litros?\s*/?\s*min(?:uto)?s?|litros?\s+por\s+minuto)", up)
             if m:
                 extracted["flow_m3h"] = round(float(m.group(1)) * 60 / 1000, 3)
             else:
-                m = re.search(r"(\d+\.?\d*)\s*m3/s", up)
+                m = re.search(r"(\d+\.?\d*)\s*(l/h|lts?/h|litros?\s*/?\s*h(?:ora)?s?|litros?\s+por\s+hora)", up)
                 if m:
-                    extracted["flow_m3h"] = round(float(m.group(1)) * 3600, 3)
+                    extracted["flow_m3h"] = round(float(m.group(1)) / 1000, 4)
+                else:
+                    m = re.search(r"(\d+\.?\d*)\s*m3/s", up)
+                    if m:
+                        extracted["flow_m3h"] = round(float(m.group(1)) * 3600, 3)
 
         head_kw = r"altura\s*est[aá]tica|altura|desnivel"
-        m = re.search(rf"(?:{head_kw})(?:\s+de)?\s+(\d+\.?\d*)\s*m(?:etros)?\b", up)
+        # se prueba primero el orden "3 metros de altura" (mas natural cuando
+        # van varias frases seguidas, p.ej. "3 metros de altura 8 metros de
+        # tuberia" — si se probara el otro orden primero, "altura" podria
+        # engancharse por error con el "8" de la frase siguiente).
+        m = re.search(rf"(\d+\.?\d*)\s*m(?:etros)?\s+de\s+(?:{head_kw})\b", up)
         if not m:
-            m = re.search(rf"(\d+\.?\d*)\s*m(?:etros)?\s+de\s+(?:{head_kw})\b", up)
+            m = re.search(rf"(?:{head_kw})(?:\s+de)?\s+(\d+\.?\d*)\s*m(?:etros)?\b", up)
         if m:
             extracted["static_head_m"] = float(m.group(1))
 
         len_kw = r"longitud|tuber[ií]a|tubo"
-        m = re.search(rf"(?:{len_kw})(?:\s+de)?\s+(\d+\.?\d*)\s*m(?:etros)?\b", up)
+        m = re.search(rf"(\d+\.?\d*)\s*m(?:etros)?\s+de\s+(?:{len_kw})\b", up)
         if not m:
-            m = re.search(rf"(\d+\.?\d*)\s*m(?:etros)?\s+de\s+(?:{len_kw})\b", up)
+            m = re.search(rf"(?:{len_kw})(?:\s+de)?\s+(\d+\.?\d*)\s*m(?:etros)?\b", up)
         if m:
             extracted["length_m"] = float(m.group(1))
 

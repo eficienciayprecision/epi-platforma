@@ -1,5 +1,43 @@
 # EPi Platform — Eficiencia y Precisión Industrial S.L.
 
+## FIX 1.8.5 (agosto 2026): quitadas las bombas sin motor (eje libre) del catálogo
+
+Jon detectó que EPi estaba ofertando una bomba "SIN MOTOR" — un modelo a
+eje libre, pensado para acoplarse a un motor que el cliente ya tiene
+instalado (típico en reposición de repuestos), no para venderse como
+equipo completo nuevo. Se identificaron y quitaron **29 referencias** de
+`app/db/pumps_catalog.csv` que contenían "SIN MOTOR", "EJE LIBRE", "BARE
+SHAFT" o variantes en su descripción/modelo — de Cucchi, Sydex y CDR. El
+catálogo pasa de 1.509 a **1.480 bombas operativas**. Como el arranque ya
+compara el número de filas del CSV contra lo que hay en la base de datos
+(fix 1.7.2), este cambio se aplica solo en el próximo redeploy, sin pasos
+manuales adicionales.
+
+## FIX 1.8.4 (agosto 2026): copia interna del Informe Técnico por email
+
+Jon pidió recibir también el segundo PDF (el Informe Interno — de dónde ha
+sacado EPi cada componente, razonamiento de tecnología, compatibilidad
+química) que antes solo se podía descargar manualmente con acceso de
+personal interno. Ahora, cada vez que se genera un presupuesto completo
+(`/api/v1/solution/oneshot`), se envía automáticamente una copia de ese
+informe a `epi@eficienciayprecisionindustrial.com` — independientemente de
+si el cliente dejó su email o no (esto es seguimiento interno, no depende
+del cliente). Configurable con `EPI_INTERNAL_REPORT_EMAIL` si en el futuro
+se quiere cambiar la dirección de destino.
+
+## FIX 1.8.2/1.8.3 (agosto 2026): entrevista — unidades y medidas seguidas
+
+Detectado por Jon en producción, dos fallos en `_extract_fields`
+(`app/agents/interview.py`, modo sin LLM):
+- No reconocía litros/minuto salvo escrito exactamente "l/min" o "lpm" —
+  ampliado a "litros por minuto", "lts/min", "litros/minuto", etc. (y lo
+  mismo para litros/hora).
+- La frase "3 metros de altura 8 metros de tubería" (dos medidas seguidas)
+  le asignaba a la altura el número de la tubería. Corregido invirtiendo
+  el orden de prioridad de búsqueda: se prueba primero "NÚMERO metros de
+  PALABRA_CLAVE" (el orden más natural cuando hay varias frases seguidas),
+  y solo si no encuentra nada así se prueba el orden inverso.
+
 ## FIX 1.8.1 (agosto 2026): la base de datos no persistía + URL de Postgres de Render
 
 Detectado tras revisar los logs de producción: los mensajes de arranque

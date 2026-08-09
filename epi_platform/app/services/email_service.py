@@ -94,3 +94,62 @@ def send_offer_email(
         # (antes este bloque lo atrapaba en silencio y era invisible).
         print(f"ERROR enviando email de oferta a {to_email}: {type(e).__name__}: {e}")
         return False
+
+
+def send_internal_report_email(
+    to_email: str,
+    client_id: str,
+    pdf_path: str,
+    final_price_eur: Optional[float] = None,
+) -> bool:
+    """NUEVO — copia interna del Informe Tecnico (el PDF de uso interno, con
+    el razonamiento de tecnologia, compatibilidad quimica y de donde ha
+    sacado cada componente) a una direccion interna, cada vez que EPi genera
+    un presupuesto completo. Independiente de si el cliente dejo su email o
+    no — esto es para seguimiento interno, no para el cliente."""
+    host = os.getenv("EPI_SMTP_HOST")
+    if not host:
+        return False
+
+    port = int(os.getenv("EPI_SMTP_PORT", "587"))
+    user = os.getenv("EPI_SMTP_USER")
+    password = os.getenv("EPI_SMTP_PASSWORD")
+    use_tls = os.getenv("EPI_SMTP_USE_TLS", "true").lower() == "true"
+    mail_from = os.getenv("EPI_MAIL_FROM", user or "epi@eficienciayprecisionindustrial.com")
+
+    precio_txt = f"{final_price_eur:,.2f} EUR".replace(",", "X").replace(".", ",").replace("X", ".") if final_price_eur else ""
+
+    msg = EmailMessage()
+    msg["Subject"] = f"[Informe interno] Presupuesto {client_id}"
+    msg["From"] = mail_from
+    msg["To"] = to_email
+    cuerpo = (
+        f"Informe interno del presupuesto {client_id}"
+        + (f" (precio final {precio_txt})" if precio_txt else "")
+        + ".\n\nIncluye el razonamiento de tecnologia de bomba, la comprobacion de "
+        "compatibilidad quimica, y de donde ha sacado EPi cada componente/material "
+        "de la oferta. Documento de uso interno — no reenviar al cliente.\n"
+    )
+    msg.set_content(cuerpo)
+
+    pdf_file = Path(pdf_path)
+    if pdf_file.exists():
+        msg.add_attachment(
+            pdf_file.read_bytes(),
+            maintype="application",
+            subtype="pdf",
+            filename=pdf_file.name,
+        )
+
+    try:
+        with smtplib.SMTP(host, port, timeout=15) as server:
+            if use_tls:
+                server.starttls()
+            if user and password:
+                server.login(user, password)
+            server.send_message(msg)
+        print(f"Email de informe interno enviado correctamente a {to_email}")
+        return True
+    except Exception as e:
+        print(f"ERROR enviando email de informe interno a {to_email}: {type(e).__name__}: {e}")
+        return False

@@ -11,6 +11,7 @@ que sigue siendo el unico que ve el Informe Interno con costes reales.
 """
 from __future__ import annotations
 
+import os
 import uuid
 from datetime import timedelta
 from pathlib import Path
@@ -51,7 +52,7 @@ from app.services.pdf_generator import (
     generate_single_item_offer_pdf, generate_single_item_internal_pdf,
 )
 from app.services.scraper import PriceScraper
-from app.services.email_service import send_offer_email
+from app.services.email_service import send_offer_email, send_internal_report_email
 from app.services.vision_service import identify_object_from_image
 
 Base.metadata.create_all(bind=engine)
@@ -71,7 +72,7 @@ except Exception as _seed_error:  # nunca debe impedir que la app arranque
 
 app = FastAPI(
     title="EPi Engine API",
-    version="1.8.1",
+    version="1.8.5",
     description="Asistente IA para mecanica de fluidos — EPI S.L. Bilbao",
 )
 app.add_middleware(
@@ -315,7 +316,7 @@ class PumpSelectRequest(BaseModel):
 
 @app.get("/health", tags=["System"])
 def health():
-    return {"status": "ok", "system": "EPi Platform", "version": "1.8.1"}
+    return {"status": "ok", "system": "EPi Platform", "version": "1.8.5"}
 
 
 @app.get("/", tags=["System"])
@@ -474,12 +475,24 @@ def solution_oneshot(request: FullSolutionRequest, db: Session = Depends(get_db)
             lead.email_sent = True
             db.commit()
 
+    # NUEVO — copia del informe TECNICO interno (de donde ha sacado cada
+    # componente, razonamiento de tecnologia, compatibilidad quimica) a la
+    # direccion interna, en cada presupuesto generado (independientemente
+    # de si el cliente dejo su email o no).
+    internal_email_sent = send_internal_report_email(
+        to_email=os.getenv("EPI_INTERNAL_REPORT_EMAIL", "epi@eficienciayprecisionindustrial.com"),
+        client_id=cid,
+        pdf_path=str(internal_path),
+        final_price_eur=solution.commercial.final_client_price_eur,
+    )
+
     return {
         "solution": solution.model_dump(),
         "client_pdf": str(client_path),
         "internal_pdf": str(internal_path),
         "lead_id": lead.id,
         "email_sent": email_sent,
+        "internal_email_sent": internal_email_sent,
     }
 
 
