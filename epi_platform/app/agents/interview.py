@@ -101,60 +101,158 @@ class InterviewAgent:
         return {"status": "incomplete", "message": reply}
 
     @classmethod
-    def _rule_based(cls, user_message: str, history: List[dict]) -> dict:
-        """Fallback sin OpenAI: entrevista guiada por contador de turnos."""
-        n = len([h for h in history if h.get("role") == "user"])
-        msg = user_message.lower()
+    def _extract_fields(cls, text: str) -> dict:
+        """Extrae por palabras clave los datos que el cliente ya haya dado,
+        en cualquier orden ('altura de 8 m' o '8 m de altura' valen igual).
+        Best-effort: no entiende tan bien como un LLM real, pero evita
+        re-preguntar datos que el cliente ya dio y evita usar siempre los
+        mismos valores de ejemplo cuando no hay OPENAI_API_KEY configurada."""
+        up = text.lower().replace(",", ".")
+        extracted: dict = {}
 
+        m = re.search(r"(\d+\.?\d*)\s*(m3/h|m³/h|m3h)", up)
+        if m:
+            extracted["flow_m3h"] = float(m.group(1))
+        else:
+            m = re.search(r"(\d+\.?\d*)\s*(l/min|lpm)", up)
+            if m:
+                extracted["flow_m3h"] = round(float(m.group(1)) * 60 / 1000, 3)
+            else:
+                m = re.search(r"(\d+\.?\d*)\s*m3/s", up)
+                if m:
+                    extracted["flow_m3h"] = round(float(m.group(1)) * 3600, 3)
+
+        head_kw = r"altura\s*est[aá]tica|altura|desnivel"
+        m = re.search(rf"(?:{head_kw})(?:\s+de)?\s+(\d+\.?\d*)\s*m(?:etros)?\b", up)
+        if not m:
+            m = re.search(rf"(\d+\.?\d*)\s*m(?:etros)?\s+de\s+(?:{head_kw})\b", up)
+        if m:
+            extracted["static_head_m"] = float(m.group(1))
+
+        len_kw = r"longitud|tuber[ií]a|tubo"
+        m = re.search(rf"(?:{len_kw})(?:\s+de)?\s+(\d+\.?\d*)\s*m(?:etros)?\b", up)
+        if not m:
+            m = re.search(rf"(\d+\.?\d*)\s*m(?:etros)?\s+de\s+(?:{len_kw})\b", up)
+        if m:
+            extracted["length_m"] = float(m.group(1))
+
+        m = re.search(r"(\d+\.?\d*)\s*mm\b", up)
+        if m:
+            extracted["diameter_mm"] = float(m.group(1))
+        else:
+            m = re.search(r'(\d+\.?\d*)\s*(pulgada|inch|")', up)
+            if m:
+                extracted["diameter_mm"] = round(float(m.group(1)) * 25.4, 1)
+            else:
+                m = re.search(r"\bdn\s?(\d+)\b", up)
+                if m:
+                    extracted["diameter_mm"] = float(m.group(1))
+
+        if "sosa" in up:
+            extracted.update(fluid_name="Sosa Caustica 30%", density_kg_m3=1330.0, viscosity_cp=4.0)
+        elif "acido" in up:
+            extracted.update(fluid_name="Acido diluido", density_kg_m3=1100.0, viscosity_cp=2.0)
+        elif "aceite" in up:
+            extracted.update(fluid_name="Aceite", density_kg_m3=900.0, viscosity_cp=100.0)
+        elif "miel" in up:
+            extracted.update(fluid_name="Miel", density_kg_m3=1400.0, viscosity_cp=2000.0)
+        elif "agua" in up:
+            extracted.update(fluid_name="Agua", density_kg_m3=1000.0, viscosity_cp=1.0)
+
+        return extracted
+
+    @classmethod
+    def _extract_process_flags(cls, text: str) -> dict:
+        up = text.lower()
+        # negacion generica de todo el bloque ("no", "no lleva nada especial"...)
+        if re.search(r'\bno\b[^.]{0,25}\b(nada|especial|aplica|de eso)\b', up) or up.strip() in ("no", "no.", "ninguno", "ninguna", "no aplica", "nada"):
+            return {"has_solids": False, "is_abrasive": False, "is_shear_sensitive": False, "requires_continuous_flow": False}
+
+        def _positive(keywords: tuple) -> bool:
+            for kw in keywords:
+                for m in re.finditer(kw, up):
+                    # si hay una negacion ("no", "sin") justo antes de la palabra clave, no cuenta
+                    window_before = up[max(0, m.start() - 15):m.start()]
+                    if re.search(r'\b(no|sin)\b\s*\w*\s*$', window_before):
+                        continue
+                    return True
+            return False
+
+        return {
+            "has_solids": _positive(("solido", "solidos", "particula", "fibra")),
+            "is_abrasive": _positive(("abrasiv", "lodo", "arena", "fango")),
+            "is_shear_sensitive": _positive(("delicad", "fragil", "cizalla", "sensible")),
+            "requires_continuous_flow": _positive(("continuo", "sin pulso", "dosifica", "precision", "medicion")),
+        }
+
+    @classmethod
+    def _rule_based(cls, user_message: str, history: List[dict]) -> dict:
+        """Fallback sin OpenAI: ya NO se basa solo en contar turnos — en cada
+        mensaje intenta extraer por palabras clave los datos que el cliente
+        ya haya dado (en cualquier orden, aunque los de todos juntos en la
+        primera respuesta), y solo pregunta por lo que de verdad falte."""
         if "{" in user_message:
             return cls._parse_reply(user_message)
 
-        questions = [
-            "Hola, soy EPi. Para dimensionar su bomba, empecemos por el caudal. ¿Que caudal necesita en m3/h? (Si no lo sabe: digame el volumen del deposito y en cuanto tiempo debe vaciarlo.)",
-            "¿Cual es la altura estatica (desnivel vertical en metros) entre la aspiracion y el punto de descarga?",
-            "¿Que longitud total tiene la tuberia (metros)?",
-            "¿Cual es el diametro interior de la tuberia (mm)? Si no esta definida, puedo proponer un DN con velocidad ~1.5 m/s.",
-            "¿Que fluido bombea? (ej: agua, sosa caustica 30%, aceite...). Indique nombre y, si puede, densidad y viscosidad.",
-            "Una ultima pregunta para elegir bien la TECNOLOGIA de bomba: ¿el fluido lleva "
-            "solidos en suspension, es abrasivo (lodos, arenas...), es delicado (no debe "
-            "agitarse mecanicamente), o necesita un caudal muy continuo sin pulsos (por "
-            "ejemplo para dosificacion de precision)? Si nada de esto aplica, dígamelo y "
-            "seguimos.",
-        ]
+        all_user_texts = [h.get("content", "") for h in history if h.get("role") == "user"] + [user_message]
 
-        # bloque 6 (naturaleza del proceso), detectado por palabras clave sobre el
-        # ultimo mensaje del cliente — solo se evalua en el turno de esa pregunta.
+        collected: dict = {}
+        for t in all_user_texts:
+            for k, v in cls._extract_fields(t).items():
+                collected.setdefault(k, v)
+
         process_flags = {
             "has_solids": False, "is_abrasive": False,
             "is_shear_sensitive": False, "requires_continuous_flow": False,
         }
-        if n == 6:
-            if any(k in msg for k in ("solido", "solidos", "particula", "fibra")):
-                process_flags["has_solids"] = True
-            if any(k in msg for k in ("abrasiv", "lodo", "arena", "fango")):
-                process_flags["is_abrasive"] = True
-            if any(k in msg for k in ("delicad", "fragil", "cizalla", "no debe agitar", "sensible")):
-                process_flags["is_shear_sensitive"] = True
-            if any(k in msg for k in ("continuo", "sin pulso", "dosifica", "precision", "medicion")):
-                process_flags["requires_continuous_flow"] = True
+        for t in all_user_texts:
+            flags = cls._extract_process_flags(t)
+            for k, v in flags.items():
+                process_flags[k] = process_flags[k] or v
 
-        if n >= 6:
-            data = {
-                "flow_m3h": 15.0,
-                "diameter_mm": 50.0,
-                "length_m": 25.0,
-                "static_head_m": 8.0,
-                "density_kg_m3": 1000.0,
-                "viscosity_cp": 1.0,
-                "fluid_name": "Agua",
-                **process_flags,
-            }
-            if "sosa" in msg:
-                data.update(density_kg_m3=1330.0, viscosity_cp=4.0, fluid_name="Sosa Caustica 30%")
-            return {
-                "status": "complete",
-                "data": data,
-                "message": "Datos estimados (modo sin LLM). Revise antes de confirmar el calculo.",
-            }
+        required_order = ["flow_m3h", "static_head_m", "length_m", "diameter_mm", "fluid_name"]
+        question_for = {
+            "flow_m3h": "¿Que caudal necesita en m3/h? (Si no lo sabe: digame el volumen del deposito y en cuanto tiempo debe vaciarlo.)",
+            "static_head_m": "¿Cual es la altura estatica (desnivel vertical en metros) entre la aspiracion y el punto de descarga?",
+            "length_m": "¿Que longitud total tiene la tuberia (metros)?",
+            "diameter_mm": "¿Cual es el diametro interior de la tuberia (mm)? Si no esta definida, puedo proponer un DN con velocidad ~1.5 m/s.",
+            "fluid_name": "¿Que fluido bombea? (ej: agua, sosa caustica 30%, aceite...). Indique nombre y, si puede, densidad y viscosidad.",
+        }
+        missing = [f for f in required_order if f not in collected]
 
-        return {"status": "incomplete", "message": questions[min(n, len(questions) - 1)]}
+        if missing:
+            greeting = "Hola, soy EPi. " if not all_user_texts[:-1] else ""
+            return {"status": "incomplete", "message": greeting + question_for[missing[0]]}
+
+        # Los 5 datos hidraulicos ya estan. Falta el bloque de proceso — se
+        # pregunta una unica vez, detectando si ya se pregunto antes por si
+        # aparece en el historial de mensajes del asistente.
+        block6_question = (
+            "Una ultima pregunta para elegir bien la TECNOLOGIA de bomba: ¿el fluido lleva "
+            "solidos en suspension, es abrasivo (lodos, arenas...), es delicado (no debe "
+            "agitarse mecanicamente), o necesita un caudal muy continuo sin pulsos (por "
+            "ejemplo para dosificacion de precision)? Si nada de esto aplica, dígamelo y "
+            "seguimos."
+        )
+        already_asked_block6 = any(
+            "TECNOLOGIA de bomba" in h.get("content", "")
+            for h in history if h.get("role") == "assistant"
+        )
+        if not already_asked_block6:
+            return {"status": "incomplete", "message": block6_question}
+
+        data = {
+            "flow_m3h": collected["flow_m3h"],
+            "diameter_mm": collected["diameter_mm"],
+            "length_m": collected["length_m"],
+            "static_head_m": collected["static_head_m"],
+            "density_kg_m3": collected.get("density_kg_m3", 1000.0),
+            "viscosity_cp": collected.get("viscosity_cp", 1.0),
+            "fluid_name": collected.get("fluid_name", "Agua"),
+            **process_flags,
+        }
+        return {
+            "status": "complete",
+            "data": data,
+            "message": "Datos completos (modo sin LLM, leidos por palabras clave de sus mensajes). Revise antes de confirmar el calculo.",
+        }

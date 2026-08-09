@@ -71,7 +71,7 @@ except Exception as _seed_error:  # nunca debe impedir que la app arranque
 
 app = FastAPI(
     title="EPi Engine API",
-    version="1.7.3",
+    version="1.8.0",
     description="Asistente IA para mecanica de fluidos — EPI S.L. Bilbao",
 )
 app.add_middleware(
@@ -315,7 +315,7 @@ class PumpSelectRequest(BaseModel):
 
 @app.get("/health", tags=["System"])
 def health():
-    return {"status": "ok", "system": "EPi Platform", "version": "1.7.3"}
+    return {"status": "ok", "system": "EPi Platform", "version": "1.8.0"}
 
 
 @app.get("/", tags=["System"])

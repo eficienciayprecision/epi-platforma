@@ -1,5 +1,50 @@
 # EPi Platform — Eficiencia y Precisión Industrial S.L.
 
+## FIX 1.8.0 (agosto 2026): la entrevista repreguntaba datos ya dados
+
+Detectado por Jon en producción: si el cliente daba todos los datos juntos
+en el primer mensaje, EPi seguía preguntando uno a uno igualmente, y al
+final siempre calculaba con los mismos valores de ejemplo (15 m3/h, 8 m,
+25 m, 50 mm, agua) — ofertando siempre la misma bomba sin importar lo que
+el cliente hubiera escrito.
+
+**Causa raíz**: sin una `OPENAI_API_KEY` configurada en Render, EPi usa un
+modo de reserva ("sin LLM") pensado solo para que la app nunca se rompa —
+pero ese modo original se limitaba a contar turnos y hacer las mismas 6
+preguntas en orden fijo, sin leer el contenido de lo que el cliente
+escribía, y terminaba siempre con los mismos valores de ejemplo
+hardcodeados.
+
+**Arreglado** (`app/agents/interview.py`, método `_rule_based`): ahora, en
+cada turno, se analizan TODOS los mensajes del cliente hasta el momento
+buscando por palabras clave los 5 datos hidráulicos (caudal, altura,
+longitud, diámetro, fluido) en cualquier orden ("altura de 8 m" o "8 m de
+altura" valen igual), y solo se pregunta por lo que de verdad falte. Si el
+cliente lo da todo junto, se pasa directo a la última pregunta (proceso/
+tecnología). También entiende negaciones simples ("no lleva sólidos").
+
+**Esto sigue sin ser tan bueno como el modo con LLM real** (que sí entiende
+lenguaje natural sin depender de patrones de texto) — si en algún momento
+Jon quiere contratar una clave de OpenAI y ponerla como variable de entorno
+`OPENAI_API_KEY` en Render, EPi cambiará automáticamente al modo inteligente
+sin tocar nada más del código.
+
+## FIX 1.7.3/1.7.4 (agosto 2026): el email fallaba en silencio + logs invisibles
+
+Jon reportó que el correo con la oferta no llegaba. Dos fallos combinados:
+
+1. `app/services/email_service.py` atrapaba cualquier error de envío
+   (usuario/contraseña incorrectos, servidor no disponible...) con un
+   `except Exception: return False` que no dejaba ningún rastro — ni éxito
+   ni fallo quedaban registrados en ningún sitio. Arreglado: ahora se
+   imprime siempre el resultado (`Email de oferta enviado correctamente a
+   ...` o `ERROR enviando email de oferta a ...: <motivo exacto>`).
+2. Aunque se arregló el `print()`, seguía sin verse en los logs de Render.
+   Causa: Python, dentro de Docker, retiene (`buffer`) la salida estándar
+   por defecto — los `print()` sueltos pueden quedarse esperando en el
+   buffer indefinidamente en vez de mostrarse al momento. Arreglado con
+   `ENV PYTHONUNBUFFERED=1` en el `Dockerfile`.
+
 ## FIX CRÍTICO 2 (1.7.2, agosto 2026): las bombas se preparaban pero nunca se guardaban
 
 Encontrado en los logs reales de Render tras el fix 1.7.1: el catálogo de
