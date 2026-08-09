@@ -343,3 +343,50 @@ def generate_single_item_internal_pdf(report: SingleItemInternalReport, output_p
 
     doc.build(elements)
     return output_path
+
+
+def generate_spare_part_offer_pdf(offer, output_path: str) -> str:
+    """NUEVO — oferta de un unico repuesto (referencia + descripcion +
+    fabricante + cantidad + precio). Reutiliza el estilo de las demas ofertas."""
+    doc = SimpleDocTemplate(output_path, pagesize=A4)
+    elements = []
+    _company_header(elements, "Oferta de Repuesto — Asistente de IA EPi")
+
+    if offer.contact and (offer.contact.company_name or offer.contact.contact_name):
+        dest = offer.contact.company_name or offer.contact.contact_name
+        elements.append(Paragraph(f"Para: {dest}", body))
+        if offer.contact.contact_name and offer.contact.company_name:
+            elements.append(Paragraph(f"At./ {offer.contact.contact_name}", body))
+        elements.append(Spacer(1, 6 * mm))
+
+    elements.append(Paragraph(f"<b>Precio total final:</b> {offer.final_price_eur:,.2f} €", h2))
+    elements.append(Spacer(1, 6 * mm))
+
+    data = [
+        ["Referencia", "Descripción", "Fabricante", "Cantidad", "Precio unitario"],
+        [offer.referencia, offer.descripcion, offer.fabricante, f"{offer.quantity:g}",
+         f"{offer.unit_price_eur:,.2f} €"],
+    ]
+    table = Table(data, colWidths=[28 * mm, 62 * mm, 35 * mm, 20 * mm, 25 * mm])
+    table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), NAVY),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+        ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
+        ("FONTSIZE", (0, 0), (-1, -1), 8),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+    ]))
+    elements.append(table)
+    elements.append(Spacer(1, 6 * mm))
+    elements.append(Paragraph(
+        "Precio de repuesto suelto — no incluye instalación ni mano de obra, salvo que "
+        "se solicite expresamente. Consulte con nosotros si necesita apoyo técnico para "
+        "el montaje.", body))
+    elements.append(Spacer(1, 8 * mm))
+    elements.append(Paragraph(
+        "<b>En caso de aceptación del presupuesto</b>, envíe el pedido oficial a "
+        "<b>pedidos@eficienciayprecisionindustrial.com</b>. Si no recibe confirmación de "
+        "la recepción de su pedido, es posible que este no se haya tramitado — "
+        "por favor, contacte con nosotros en ese caso.", body))
+
+    doc.build(elements)
+    return output_path

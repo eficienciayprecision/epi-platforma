@@ -34,6 +34,19 @@ class PumpModel(Base):
     curve_reference_url = Column(String, nullable=True)
 
 
+class SparePartModel(Base):
+    """NUEVO — catalogo de repuestos (sin motor/bomba completa), buscable por
+    referencia exacta o parcial. El PVP ya es el precio final a mostrar al
+    cliente (el margen de EPi viene del descuento de distribuidor sobre este
+    mismo precio, no se le suma nada encima)."""
+    __tablename__ = "spare_parts_catalog"
+
+    referencia = Column(String, primary_key=True, index=True)
+    descripcion = Column(Text, default="")
+    fabricante = Column(String, default="", index=True)
+    precio_eur = Column(Float, nullable=False)
+
+
 class UserModel(Base):
     """Usuarios internos (staff): admin / engineer. Ya NO hay usuarios cliente:
     el cliente ahora se identifica solo con sus datos de contacto opcionales."""

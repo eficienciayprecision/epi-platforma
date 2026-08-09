@@ -172,6 +172,30 @@
           Trabajar a partir de una foto <span class="badge" style="margin-left:6px">BETA</span>
           <span class="desc">Sube una foto y EPi te preguntará si quieres una oferta de un elemento suelto o mejorar toda la instalación.</span>
         </button>
+        <button class="menu-btn" data-mode="repuesto">
+          Buscar un repuesto
+          <span class="desc">Indica la referencia y te decimos el precio al momento — sin necesidad de dimensionar una bomba nueva.</span>
+        </button>
+      </div>
+
+      <!-- NUEVO: buscador de repuestos por referencia -->
+      <div id="repuestoArea" style="display:none">
+        <span class="mode-badge">Buscar un repuesto</span>
+        <button id="changeModeBtnRepuesto" class="outline" style="margin-left:6px">← Elegir otra opción</button>
+        <div style="margin-top:12px">
+          <label style="display:block;font-size:0.8rem;color:var(--gray);margin-bottom:4px">Referencia del repuesto</label>
+          <div style="display:flex;gap:8px">
+            <input id="repuestoRefInput" type="text" placeholder="Ej: 4230265000" style="flex:1" />
+            <button id="repuestoBuscarBtn">Buscar</button>
+          </div>
+        </div>
+        <div id="repuestoResults" style="margin-top:14px"></div>
+        <div id="repuestoQuoteBox" style="display:none;margin-top:14px">
+          <label style="display:block;font-size:0.8rem;color:var(--gray);margin-bottom:4px">Cantidad</label>
+          <input id="repuestoQtyInput" type="number" value="1" min="0.01" step="1" style="width:100px" />
+          <button id="repuestoOfertaBtn" style="margin-left:8px">Generar oferta</button>
+        </div>
+        <div id="repuestoOutput" style="margin-top:14px"></div>
       </div>
 
       <!-- NUEVO: pregunta previa del modo foto -->
@@ -497,12 +521,88 @@
         if (btn.dataset.mode === "photo") {
           menuOptions.style.display = "none";
           document.getElementById("photoChoice").style.display = "block";
+        } else if (btn.dataset.mode === "repuesto") {
+          menuOptions.style.display = "none";
+          document.getElementById("repuestoArea").style.display = "block";
         } else {
           selectMode(btn.dataset.mode);
         }
       });
     });
     document.getElementById("changeModeBtn").addEventListener("click", backToMenu);
+    document.getElementById("changeModeBtnRepuesto").addEventListener("click", () => {
+      document.getElementById("repuestoArea").style.display = "none";
+      document.getElementById("repuestoResults").innerHTML = "";
+      document.getElementById("repuestoOutput").innerHTML = "";
+      document.getElementById("repuestoQuoteBox").style.display = "none";
+      menuOptions.style.display = "flex";
+    });
+
+    // NUEVO — buscador de repuestos: busca por referencia, elige uno, genera oferta.
+    let repuestoSeleccionado = null;
+    document.getElementById("repuestoBuscarBtn").addEventListener("click", buscarRepuesto);
+    document.getElementById("repuestoRefInput").addEventListener("keydown", e => {
+      if (e.key === "Enter") buscarRepuesto();
+    });
+    async function buscarRepuesto() {
+      const ref = document.getElementById("repuestoRefInput").value.trim();
+      const resultsBox = document.getElementById("repuestoResults");
+      document.getElementById("repuestoQuoteBox").style.display = "none";
+      document.getElementById("repuestoOutput").innerHTML = "";
+      if (!ref) { resultsBox.innerHTML = ""; return; }
+      resultsBox.innerHTML = "<p style='color:var(--gray);font-size:0.85rem'>Buscando...</p>";
+      try {
+        const r = await fetch(API + "/api/v1/repuestos/buscar?referencia=" + encodeURIComponent(ref));
+        const data = await r.json();
+        if (!data.results || data.results.length === 0) {
+          resultsBox.innerHTML = "<p style='color:var(--gray);font-size:0.85rem'>No se ha encontrado ninguna referencia parecida.</p>";
+          return;
+        }
+        resultsBox.innerHTML = "";
+        data.results.forEach(part => {
+          const div = document.createElement("div");
+          div.className = "menu-btn";
+          div.style.cursor = "pointer";
+          div.innerHTML = `<b>${part.referencia}</b> — ${part.precio_eur.toFixed(2)} €`
+            + `<span class="desc">${part.descripcion || ""} ${part.fabricante ? "· " + part.fabricante : ""}</span>`;
+          div.addEventListener("click", () => {
+            repuestoSeleccionado = part;
+            document.getElementById("repuestoQuoteBox").style.display = "block";
+            document.querySelectorAll("#repuestoResults .menu-btn").forEach(el => el.style.borderColor = "var(--border)");
+            div.style.borderColor = "var(--gold)";
+          });
+          resultsBox.appendChild(div);
+        });
+      } catch (e) {
+        resultsBox.innerHTML = "<p style='color:var(--gray);font-size:0.85rem'>Error buscando el repuesto.</p>";
+      }
+    }
+    document.getElementById("repuestoOfertaBtn").addEventListener("click", async () => {
+      if (!repuestoSeleccionado) return;
+      const qty = parseFloat(document.getElementById("repuestoQtyInput").value) || 1;
+      const outputBox = document.getElementById("repuestoOutput");
+      outputBox.innerHTML = "<p style='color:var(--gray);font-size:0.85rem'>Generando oferta...</p>";
+      try {
+        const r = await fetch(API + "/api/v1/repuestos/oferta", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            referencia: repuestoSeleccionado.referencia,
+            quantity: qty,
+            contact: getContact(),
+          }),
+        });
+        const data = await r.json();
+        if (!r.ok) {
+          outputBox.innerHTML = `<p style='color:#b00'>Error: ${data.detail || "no se pudo generar la oferta"}</p>`;
+          return;
+        }
+        outputBox.innerHTML = `<p><b>Precio total: ${data.offer.final_price_eur.toFixed(2)} €</b></p>`
+          + `<p style="font-size:0.85rem;color:var(--gray)">${data.email_sent ? "Oferta enviada a tu email." : "PDF generado."}</p>`;
+      } catch (e) {
+        outputBox.innerHTML = "<p style='color:#b00'>Error generando la oferta.</p>";
+      }
+    });
 
     function backToMenuFromPhoto() {
       document.getElementById("photoChoice").style.display = "none";

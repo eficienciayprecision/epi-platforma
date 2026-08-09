@@ -66,9 +66,27 @@ _TECH_LABELS = {
 }
 
 
-def seed():
-    Base.metadata.create_all(bind=engine)
-    db = SessionLocal()
+SPARE_PARTS_CSV = os.path.join(os.path.dirname(os.path.abspath(__file__)), "repuestos_catalog.csv")
+
+
+def _load_spare_parts_from_csv(path: str) -> list:
+    from app.db.models import SparePartModel
+    rows = []
+    seen = set()
+    with open(path, newline="", encoding="utf-8") as f:
+        for row in csv.DictReader(f):
+            ref = row["referencia"].strip()
+            if not ref or ref in seen:
+                continue  # referencias duplicadas en el origen: se queda la primera
+            seen.add(ref)
+            rows.append(SparePartModel(
+                referencia=ref,
+                descripcion=row["descripcion"],
+                fabricante=row["fabricante"],
+                precio_eur=float(row["precio_eur"]),
+            ))
+    return rows
+
 
 def seed():
     Base.metadata.create_all(bind=engine)
@@ -91,6 +109,20 @@ def seed():
         print(f"Catalogo de bombas actualizado: {current_count} bombas antiguas sustituidas por {len(catalog)} nuevas.")
     else:
         print(f"Catalogo de bombas ya esta actualizado ({current_count} bombas).")
+
+    # PASO 1b: catalogo de repuestos (independiente del de bombas).
+    from app.db.models import SparePartModel
+    spare_parts = _load_spare_parts_from_csv(SPARE_PARTS_CSV) if os.path.exists(SPARE_PARTS_CSV) else []
+    current_sp_count = db.query(SparePartModel).count()
+    if not spare_parts:
+        print(f"AVISO: no se encontro {SPARE_PARTS_CSV}; catalogo de repuestos ({current_sp_count}) no tocado.")
+    elif current_sp_count != len(spare_parts):
+        db.query(SparePartModel).delete()
+        db.add_all(spare_parts)
+        db.commit()
+        print(f"Catalogo de repuestos actualizado: {current_sp_count} antiguos sustituidos por {len(spare_parts)} nuevos.")
+    else:
+        print(f"Catalogo de repuestos ya esta actualizado ({current_sp_count} repuestos).")
 
     # PASO 2: usuarios internos. Aislado en su propio try/except: un fallo
     # aqui (p.ej. de compatibilidad de bcrypt) no debe poder deshacer ni

@@ -239,6 +239,31 @@ class ObjectIdentificationResult(BaseModel):
     source: str = "vision_api"  # "vision_api" | "fallback_sin_configurar"
 
 
+class SparePartSearchResult(BaseModel):
+    """NUEVO — resultado de buscar un repuesto por referencia."""
+    referencia: str
+    descripcion: str
+    fabricante: str
+    precio_eur: float
+
+
+class SparePartQuoteRequest(BaseModel):
+    referencia: str
+    quantity: float = Field(default=1.0, gt=0)
+    contact: Optional[ContactInfo] = None
+
+
+class SparePartOffer(BaseModel):
+    """NUEVO — oferta de UN repuesto (sin motor/bomba completa)."""
+    referencia: str
+    descripcion: str
+    fabricante: str
+    quantity: float
+    unit_price_eur: float
+    final_price_eur: float
+    contact: Optional[ContactInfo] = None
+
+
 class ItemQuoteRequest(BaseModel):
     """Elemento ya confirmado (o corregido) por el cliente, listo para ofertar."""
 

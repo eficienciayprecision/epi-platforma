@@ -32,12 +32,13 @@ from app.auth import (
     ACCESS_TOKEN_EXPIRE_MINUTES,
 )
 from app.db.database import get_db, engine, Base
-from app.db.models import PumpModel, UserModel, LeadModel
+from app.db.models import PumpModel, UserModel, LeadModel, SparePartModel
 from app.schemas.epi_schemas import (
     InvestmentProfile, PumpTechnology, TechnologyRecommendation,
     HydraulicCalculationRequest, HydraulicCalculationResponse,
     SelectedPump, MaterialsBreakdown, EPiFullSolution, ContactInfo,
     ObjectIdentificationResult, ItemQuoteRequest, SingleItemSolution,
+    SparePartQuoteRequest, SparePartOffer,
 )
 from app.engine.hydraulics import HydraulicEngine
 from app.engine.commercial import CommercialEngine
@@ -50,6 +51,7 @@ from app.agents.adhesive import AdhesiveAgent
 from app.services.pdf_generator import (
     generate_client_offer_pdf, generate_internal_report_pdf,
     generate_single_item_offer_pdf, generate_single_item_internal_pdf,
+    generate_spare_part_offer_pdf,
 )
 from app.services.scraper import PriceScraper
 from app.services.email_service import send_offer_email, send_internal_report_email
@@ -72,7 +74,7 @@ except Exception as _seed_error:  # nunca debe impedir que la app arranque
 
 app = FastAPI(
     title="EPi Engine API",
-    version="1.8.5",
+    version="1.9.0",
     description="Asistente IA para mecanica de fluidos — EPI S.L. Bilbao",
 )
 app.add_middleware(
@@ -316,7 +318,7 @@ class PumpSelectRequest(BaseModel):
 
 @app.get("/health", tags=["System"])
 def health():
-    return {"status": "ok", "system": "EPi Platform", "version": "1.8.5"}
+    return {"status": "ok", "system": "EPi Platform", "version": "1.9.0"}
 
 
 @app.get("/", tags=["System"])
@@ -679,5 +681,92 @@ def photo_quote_item(request: ItemQuoteRequest, db: Session = Depends(get_db)):
         "client_pdf": str(client_path),
         "internal_pdf": str(internal_path),
         "lead_id": lead.id,
+        "email_sent": email_sent,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Repuestos (solo referencia + PVP) — NUEVO, publico, sin login
+# ---------------------------------------------------------------------------
+
+@app.get("/api/v1/repuestos/buscar", tags=["Cliente — Repuestos"])
+def buscar_repuesto(referencia: str, db: Session = Depends(get_db)):
+    """Busca por referencia exacta primero; si no hay resultado exacto,
+    busca por coincidencia parcial (hasta 20 resultados)."""
+    ref = referencia.strip()
+    if not ref:
+        raise HTTPException(status_code=400, detail="Indique una referencia.")
+
+    exact = db.query(SparePartModel).filter(SparePartModel.referencia == ref).first()
+    if exact:
+        rows = [exact]
+    else:
+        rows = (
+            db.query(SparePartModel)
+            .filter(SparePartModel.referencia.ilike(f"%{ref}%"))
+            .limit(20)
+            .all()
+        )
+    return {
+        "query": ref,
+        "results": [
+            {
+                "referencia": r.referencia,
+                "descripcion": r.descripcion,
+                "fabricante": r.fabricante,
+                "precio_eur": r.precio_eur,
+            }
+            for r in rows
+        ],
+    }
+
+
+@app.post("/api/v1/repuestos/oferta", tags=["Cliente — Repuestos"])
+def oferta_repuesto(request: SparePartQuoteRequest, db: Session = Depends(get_db)):
+    part = db.query(SparePartModel).filter(SparePartModel.referencia == request.referencia.strip()).first()
+    if not part:
+        raise HTTPException(status_code=404, detail=f"No se encuentra la referencia '{request.referencia}'.")
+
+    final_price = round(part.precio_eur * request.quantity, 2)
+    offer = SparePartOffer(
+        referencia=part.referencia,
+        descripcion=part.descripcion,
+        fabricante=part.fabricante,
+        quantity=request.quantity,
+        unit_price_eur=part.precio_eur,
+        final_price_eur=final_price,
+        contact=request.contact,
+    )
+
+    client_path = OUTPUT_DIR / f"Oferta_Repuesto_{part.referencia}_{uuid.uuid4().hex[:6]}.pdf"
+    generate_spare_part_offer_pdf(offer, str(client_path))
+
+    email_sent = False
+    if request.contact and request.contact.email:
+        email_sent = send_offer_email(
+            to_email=request.contact.email,
+            contact_name=request.contact.contact_name,
+            company_name=request.contact.company_name,
+            pdf_path=str(client_path),
+            final_price_eur=final_price,
+        )
+
+    lead = LeadModel(
+        contact_name=request.contact.contact_name if request.contact else None,
+        company_name=request.contact.company_name if request.contact else None,
+        phone=request.contact.phone if request.contact else None,
+        email=request.contact.email if request.contact else None,
+        client_id=f"REPUESTO-{part.referencia}",
+        final_price_eur=final_price,
+        profile_selected="REPUESTO",
+        email_sent=email_sent,
+        solution_snapshot=offer.model_dump(),
+    )
+    db.add(lead)
+    db.commit()
+
+    return {
+        "offer": offer.model_dump(),
+        "client_pdf": str(client_path),
         "email_sent": email_sent,
     }
