@@ -33,7 +33,7 @@ from app.auth import (
 from app.db.database import get_db, engine, Base
 from app.db.models import PumpModel, UserModel, LeadModel
 from app.schemas.epi_schemas import (
-    InvestmentProfile, PumpTechnology,
+    InvestmentProfile, PumpTechnology, TechnologyRecommendation,
     HydraulicCalculationRequest, HydraulicCalculationResponse,
     SelectedPump, MaterialsBreakdown, EPiFullSolution, ContactInfo,
     ObjectIdentificationResult, ItemQuoteRequest, SingleItemSolution,
@@ -41,6 +41,8 @@ from app.schemas.epi_schemas import (
 from app.engine.hydraulics import HydraulicEngine
 from app.engine.commercial import CommercialEngine
 from app.engine.energy import EnergyOptimizer
+from app.engine.pump_technology import PumpTechnologyAdvisor
+from app.engine.chemical_compatibility import ChemicalCompatibilityAdvisor
 from app.agents.interview import InterviewAgent
 from app.agents.efficiency import EfficiencyAdvisorAgent
 from app.agents.adhesive import AdhesiveAgent
@@ -56,7 +58,7 @@ Base.metadata.create_all(bind=engine)
 
 app = FastAPI(
     title="EPi Engine API",
-    version="1.2.0",
+    version="1.7.0",
     description="Asistente IA para mecanica de fluidos — EPI S.L. Bilbao",
 )
 app.add_middleware(
@@ -85,6 +87,7 @@ def pump_row_to_selected(row: PumpModel) -> SelectedPump:
         "Neumatica de Doble Membrana": PumpTechnology.NEUMATICA_DOBLE_MEMBRANA,
         "Peristaltica": PumpTechnology.PERISTALTICA,
         "Tornillo Helicoidal": PumpTechnology.TORNILLO_HELICOIDAL,
+        "Engranajes": PumpTechnology.ENGRANAJES,
     }
     tech = tech_map.get(row.technology, PumpTechnology.CENTRIFUGA_MECANICO)
     try:
@@ -100,25 +103,84 @@ def pump_row_to_selected(row: PumpModel) -> SelectedPump:
         recommended_motor_kw=row.recommended_motor_kw or 1.5,
         motor_voltage=row.motor_voltage or "Trifasico 400V",
         match_score=row.match_score or 0.8,
+        wetted_body_material=row.wetted_body_material,
+        wetted_elastomer_material=row.wetted_elastomer_material,
+        curve_reference_url=row.curve_reference_url,
     )
 
 
-def select_from_db(
-    db: Session, flow: float, head: float, profile: InvestmentProfile, atex: bool = False,
-) -> Optional[SelectedPump]:
+def _query_technology(
+    db: Session, flow: float, head: float, profile: InvestmentProfile,
+    atex: bool, technology: PumpTechnology, relax_profile: bool = False,
+) -> List[PumpModel]:
     q = db.query(PumpModel).filter(
-        PumpModel.profile == profile.value,
+        PumpModel.technology == technology.value,
         PumpModel.min_flow_m3h <= flow,
         PumpModel.max_flow_m3h >= flow,
         PumpModel.max_head_m >= head,
     )
+    if not relax_profile:
+        q = q.filter(PumpModel.profile == profile.value)
     if atex:
         q = q.filter(PumpModel.is_atex == True)  # noqa: E712
-    rows = q.all()
-    if not rows:
-        return None
-    best = max(rows, key=lambda r: r.match_score or 0)
-    return pump_row_to_selected(best)
+    return q.all()
+
+
+def select_from_db(
+    db: Session, flow: float, head: float, profile: InvestmentProfile, atex: bool = False,
+    hydraulics_req: Optional[HydraulicCalculationRequest] = None,
+) -> tuple[Optional[SelectedPump], List[TechnologyRecommendation]]:
+    """NUEVO (V7): ya no busca solo por caudal/altura/perfil — primero decide
+    que tecnologia(s) son fisicamente aptas para el proceso descrito
+    (solidos, abrasividad, necesidad de flujo continuo...) usando
+    PumpTechnologyAdvisor, y solo dentro de esas tecnologias aplica el
+    filtro de caudal/altura/perfil de siempre. Se prueban las tecnologias
+    aptas en orden de puntuacion; si la mas adecuada no tiene stock en ese
+    caudal/altura/perfil, se prueba la siguiente antes de rendirse.
+    Devuelve tambien el razonamiento completo (aptas y no aptas) para que
+    el informe pueda explicar la decision.
+
+    NUEVO (V8): dentro de cada tecnologia, si se conoce el fluido y hay mas
+    de una bomba candidata, se descartan primero las que tengan un material
+    de cuerpo o elastomero conocido como quimicamente incompatible con ese
+    fluido — salvo que TODAS las candidatas de esa tecnologia lo sean, en
+    cuyo caso se sigue eligiendo la de mejor match_score (major devolver una
+    bomba con aviso de compatibilidad que ninguna bomba)."""
+
+    hyd_req = hydraulics_req or HydraulicCalculationRequest(
+        flow_m3h=flow, diameter_mm=100.0, length_m=10.0,
+    )
+    reasoning = PumpTechnologyAdvisor.evaluate(hyd_req, profile)
+    ranked_allowed = [r.technology for r in reasoning if r.suitable]
+    if not ranked_allowed:
+        ranked_allowed = [r.technology for r in reasoning]
+
+    bad_body, bad_elastomer = ChemicalCompatibilityAdvisor.bad_materials_for(hyd_req.fluid_name)
+
+    def _best(rows: List[PumpModel]) -> PumpModel:
+        if bad_body or bad_elastomer:
+            compatible_rows = [
+                r for r in rows
+                if r.wetted_body_material not in bad_body
+                and r.wetted_elastomer_material not in bad_elastomer
+            ]
+            if compatible_rows:
+                rows = compatible_rows
+        return max(rows, key=lambda r: r.match_score or 0)
+
+    for tech in ranked_allowed:
+        rows = _query_technology(db, flow, head, profile, atex, tech)
+        if rows:
+            return pump_row_to_selected(_best(rows)), reasoning
+
+    # Ninguna bomba en el perfil de inversion pedido: relajamos el perfil
+    # (pero NUNCA la tecnologia, que es una restriccion fisica, no de precio)
+    for tech in ranked_allowed:
+        rows = _query_technology(db, flow, head, profile, atex, tech, relax_profile=True)
+        if rows:
+            return pump_row_to_selected(_best(rows)), reasoning
+
+    return None, reasoning
 
 
 def default_materials(diameter_mm: float, length_m: float, use_scraper: bool = True) -> MaterialsBreakdown:
@@ -128,16 +190,28 @@ def default_materials(diameter_mm: float, length_m: float, use_scraper: bool = T
 
 def compute_full_solution(req: "FullSolutionRequest", db: Session) -> EPiFullSolution:
     hyd = HydraulicEngine(req.hydraulics_input).compute()
-    pump = select_from_db(
+    pump, tech_reasoning = select_from_db(
         db, hyd.flow_m3h, hyd.total_dynamic_head_m, req.profile, req.is_atex_required,
+        hydraulics_req=req.hydraulics_input,
     )
     if not pump:
         raise HTTPException(
             status_code=404,
             detail=f"No hay bomba para perfil {req.profile.value} "
-                   f"Q={hyd.flow_m3h} TDH={hyd.total_dynamic_head_m}",
+                   f"Q={hyd.flow_m3h} TDH={hyd.total_dynamic_head_m} "
+                   f"con una tecnologia apta para el proceso descrito.",
         )
-    pump = pump.model_copy(update={"recommended_motor_kw": hyd.recommended_motor_kw})
+    # El caudalimetro hidraulico solo aplica a bombas con motor electrico:
+    # las neumaticas (AODD) no llevan motor electrico, se alimentan de aire.
+    if pump.technology != PumpTechnology.NEUMATICA_DOBLE_MEMBRANA:
+        pump = pump.model_copy(update={"recommended_motor_kw": hyd.recommended_motor_kw})
+
+    # NUEVO (V8): compatibilidad quimica del fluido con el material de la bomba elegida.
+    chem_check = ChemicalCompatibilityAdvisor.check(
+        fluid_name=req.hydraulics_input.fluid_name,
+        body_material=pump.wetted_body_material,
+        elastomer_material=pump.wetted_elastomer_material,
+    )
 
     if req.custom_materials:
         lines = [commercial_engine.build_material_line(**m) for m in req.custom_materials]
@@ -154,6 +228,8 @@ def compute_full_solution(req: "FullSolutionRequest", db: Session) -> EPiFullSol
         profile=req.profile, pump=pump, materials=materials, hydraulics=hyd,
         client_id=client_id, labor_engineering_eur=req.labor_engineering_eur,
         network_status=req.network_status, contact=req.contact,
+        technology_reasoning=tech_reasoning,
+        chemical_compatibility=chem_check,
     )
 
 
@@ -210,6 +286,14 @@ class PumpSelectRequest(BaseModel):
     flow_m3h: float = Field(..., gt=0)
     total_head_m: float = Field(..., gt=0)
     is_atex_required: bool = False
+    # NUEVO (V7) — mismas variables de proceso que en el calculo hidraulico,
+    # para que la seleccion manual (uso interno) tambien razone tecnologia.
+    has_solids: bool = False
+    is_abrasive: bool = False
+    is_shear_sensitive: bool = False
+    requires_continuous_flow: bool = False
+    # NUEVO (V8) — para poder comprobar compatibilidad quimica tambien aqui.
+    fluid_name: str = "Agua"
 
 
 # ---------------------------------------------------------------------------
@@ -218,7 +302,7 @@ class PumpSelectRequest(BaseModel):
 
 @app.get("/health", tags=["System"])
 def health():
-    return {"status": "ok", "system": "EPi Platform", "version": "1.2.0"}
+    return {"status": "ok", "system": "EPi Platform", "version": "1.7.0"}
 
 
 @app.get("/", tags=["System"])
@@ -227,15 +311,6 @@ def root():
     if index.exists():
         return FileResponse(index)
     return {"message": "EPi API", "docs": "/docs", "ui": "/ui/"}
-
-
-@app.get("/privacy", tags=["System"])
-def privacy_policy():
-    """Politica de Privacidad y Cookies (RGPD/LOPDGDD + LSSI-CE)."""
-    page = FRONTEND_DIR / "privacy.html"
-    if page.exists():
-        return FileResponse(page)
-    return {"message": "Politica de privacidad no disponible"}
 
 
 # ---------------------------------------------------------------------------
@@ -323,12 +398,34 @@ def calculate(request: HydraulicCalculationRequest, _: User = Depends(require_st
 @app.post("/api/v1/pumps/select", tags=["Interno — Seleccion"])
 def select_pumps(request: PumpSelectRequest, db: Session = Depends(get_db),
                  _: User = Depends(require_staff)):
+    hyd_req = HydraulicCalculationRequest(
+        flow_m3h=request.flow_m3h, diameter_mm=100.0, length_m=10.0,
+        fluid_name=request.fluid_name,
+        has_solids=request.has_solids, is_abrasive=request.is_abrasive,
+        is_shear_sensitive=request.is_shear_sensitive,
+        requires_continuous_flow=request.requires_continuous_flow,
+    )
     result = {}
+    reasoning = None
     for profile in InvestmentProfile:
-        pump = select_from_db(db, request.flow_m3h, request.total_head_m, profile, request.is_atex_required)
+        pump, reasoning = select_from_db(
+            db, request.flow_m3h, request.total_head_m, profile,
+            request.is_atex_required, hydraulics_req=hyd_req,
+        )
         if pump:
-            result[profile.value] = pump.model_dump()
-    return result
+            chem = ChemicalCompatibilityAdvisor.check(
+                fluid_name=request.fluid_name,
+                body_material=pump.wetted_body_material,
+                elastomer_material=pump.wetted_elastomer_material,
+            )
+            result[profile.value] = {
+                "pump": pump.model_dump(),
+                "chemical_compatibility": chem.model_dump(),
+            }
+    return {
+        "pumps_by_profile": result,
+        "technology_reasoning": [r.model_dump() for r in (reasoning or [])],
+    }
 
 
 # ---------------------------------------------------------------------------

@@ -24,6 +24,7 @@ class PumpTechnology(str, Enum):
     NEUMATICA_DOBLE_MEMBRANA = "Neumatica de Doble Membrana"
     PERISTALTICA = "Peristaltica"
     TORNILLO_HELICOIDAL = "Tornillo Helicoidal"
+    ENGRANAJES = "Engranajes"
 
 
 # ---------------------------------------------------------------------------
@@ -56,6 +57,24 @@ class HydraulicCalculationRequest(BaseModel):
     roughness_mm: float = 0.045  # acero inoxidable estandar
     k_accessories: float = 5.0
     npsh_available_m: Optional[float] = None
+
+    # NUEVO (V7) — variables de proceso para el razonamiento de tecnologia de bomba.
+    # Ninguna es obligatoria: si el cliente no las conoce, se asumen valores
+    # conservadores (sin solidos, no abrasivo, no critico en continuidad de flujo).
+    has_solids: bool = False
+    max_particle_size_mm: Optional[float] = None
+    is_abrasive: bool = False
+    is_shear_sensitive: bool = False  # fluido delicado (p.ej. biologico, alimentario fragil)
+    requires_continuous_flow: bool = False  # dosificacion/medicion de precision, sin pulsos
+
+
+class TechnologyRecommendation(BaseModel):
+    """Explicacion de por que una tecnologia de bomba encaja o no con el proceso descrito."""
+    technology: PumpTechnology
+    suitable: bool
+    score: float = Field(..., ge=0.0, le=1.0)
+    reasons: List[str] = []
+    warnings: List[str] = []
 
 
 class HydraulicCalculationResponse(BaseModel):
@@ -97,6 +116,25 @@ class SelectedPump(BaseModel):
     recommended_motor_kw: float = 1.5
     motor_voltage: str = "Trifasico 400V"
     match_score: float = 0.8
+    # NUEVO (V8): material en contacto con el fluido, para compatibilidad quimica.
+    wetted_body_material: Optional[str] = None
+    wetted_elastomer_material: Optional[str] = None
+    # NUEVO (V9): enlace a la curva oficial del fabricante, cuando se localice.
+    # De momento vacio para casi todo el catalogo -> se dibuja una curva
+    # orientativa (aproximada, no exacta) a partir de caudal/presion maximos.
+    curve_reference_url: Optional[str] = None
+
+
+class ChemicalCompatibilityResult(BaseModel):
+    """NUEVO (V8): resultado de comprobar si el fluido descrito es compatible
+    con los materiales de la bomba seleccionada (cuerpo mojado y elastomero/
+    junta). `compatible=None` significa que no hay dato de material suficiente
+    para pronunciarse — no es un "si", hay que verificarlo a mano."""
+    fluid_name: str
+    body_material: Optional[str] = None
+    elastomer_material: Optional[str] = None
+    compatible: Optional[bool] = None
+    warnings: List[str] = []
 
 
 # ---------------------------------------------------------------------------
@@ -166,6 +204,11 @@ class InternalReport(BaseModel):
     engineer_instructions: str
     # NUEVO
     contact: Optional[ContactInfo] = None
+    # NUEVO (V7): por que se eligio esta tecnologia de bomba (y por que se
+    # descartaron las demas), para que el ingeniero pueda revisarlo/corregirlo.
+    technology_reasoning: List[TechnologyRecommendation] = []
+    # NUEVO (V8): compatibilidad quimica fluido/material de la bomba elegida.
+    chemical_compatibility: Optional[ChemicalCompatibilityResult] = None
 
 
 class EPiFullSolution(BaseModel):
@@ -176,6 +219,10 @@ class EPiFullSolution(BaseModel):
     commercial: CommercialBreakdown
     client_offer: ClientOffer
     internal_report: InternalReport
+    # NUEVO (V7): por que EPi ha elegido esta tecnologia de bomba y no otra.
+    technology_reasoning: List[TechnologyRecommendation] = []
+    # NUEVO (V8): compatibilidad quimica fluido/material de la bomba elegida.
+    chemical_compatibility: Optional[ChemicalCompatibilityResult] = None
 
 
 # ---------------------------------------------------------------------------

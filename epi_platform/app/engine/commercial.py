@@ -18,6 +18,8 @@ from typing import List, Optional
 from app.schemas.epi_schemas import (
     InvestmentProfile,
     PumpTechnology,
+    TechnologyRecommendation,
+    ChemicalCompatibilityResult,
     HydraulicCalculationResponse,
     MaterialLine,
     MaterialsBreakdown,
@@ -165,6 +167,8 @@ class CommercialEngine:
         network_status: str = "Tuberías Soldadas (Sin Parada)",
         consultation_date: Optional[date] = None,
         contact: Optional[ContactInfo] = None,
+        technology_reasoning: Optional[List[TechnologyRecommendation]] = None,
+        chemical_compatibility: Optional[ChemicalCompatibilityResult] = None,
     ) -> InternalReport:
         if client_id is None:
             client_id = f"{self.default_client_id_prefix}-BILBAO-0000"
@@ -188,6 +192,8 @@ class CommercialEngine:
             selected_pump=pump,
             engineer_instructions=instructions,
             contact=contact,
+            technology_reasoning=technology_reasoning or [],
+            chemical_compatibility=chemical_compatibility,
         )
 
     # -------------------------------------------------------------------------
@@ -201,6 +207,8 @@ class CommercialEngine:
         labor_engineering_eur: Optional[float] = None,
         network_status: str = "Tuberías Soldadas (Sin Parada)",
         contact: Optional[ContactInfo] = None,
+        technology_reasoning: Optional[List[TechnologyRecommendation]] = None,
+        chemical_compatibility: Optional[ChemicalCompatibilityResult] = None,
     ) -> EPiFullSolution:
         """Punto de entrada principal tras el botón "Nosotros nos encargamos"."""
         commercial = self.calculate_commercial(
@@ -218,6 +226,8 @@ class CommercialEngine:
             commercial=commercial, pump=pump, materials=materials,
             hydraulics=hydraulics, client_id=client_id,
             network_status=network_status, contact=contact,
+            technology_reasoning=technology_reasoning,
+            chemical_compatibility=chemical_compatibility,
         )
 
         return EPiFullSolution(
@@ -228,6 +238,8 @@ class CommercialEngine:
             commercial=commercial,
             client_offer=client_offer,
             internal_report=internal_report,
+            technology_reasoning=technology_reasoning or [],
+            chemical_compatibility=chemical_compatibility,
         )
 
     # -------------------------------------------------------------------------

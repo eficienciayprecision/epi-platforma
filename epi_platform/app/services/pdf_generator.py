@@ -1,27 +1,85 @@
 """Generacion de PDFs: Oferta Cliente (limpia) e Informe Interno (completo)."""
 from __future__ import annotations
 
+import os
+
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import mm
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.enums import TA_CENTER
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
 
 from app.schemas.epi_schemas import ClientOffer, InternalReport, SingleItemOffer, SingleItemInternalReport
+from app.services.pump_curve import build_curve_drawing
 
-NAVY = colors.HexColor("#0B1D36")
-GOLD = colors.HexColor("#C9A227")
+# Identidad visual (colores y tipografias reales de la web, agosto 2026)
+NAVY_DEEP = colors.HexColor("#071527")
+NAVY = colors.HexColor("#0e2b4d")
+BRASS = colors.HexColor("#c69a45")
+BRASS_BRIGHT = colors.HexColor("#e0b25f")
+INK = colors.HexColor("#1a2433")
+INK_SOFT = colors.HexColor("#4a5568")
+# alias retrocompatibles (el resto del fichero usaba estos nombres)
+NAVY_TEXT = INK
+GOLD = BRASS
+
+_ASSETS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "assets")
+_LOGO_PATH = os.path.join(_ASSETS_DIR, "logo_transparent.png")
+_MONO_REGULAR = os.path.join(_ASSETS_DIR, "fonts", "IBMPlexMono-Regular.ttf")
+_MONO_BOLD = os.path.join(_ASSETS_DIR, "fonts", "IBMPlexMono-Bold.ttf")
+
+# IBM Plex Mono es la tipografia real de la web para etiquetas/eyebrows.
+# Cormorant (titulares web) no tiene sustituto exacto disponible sin conexion
+# a internet -> se usa Times (serif clasica) como aproximacion mas cercana.
+_MONO_AVAILABLE = os.path.exists(_MONO_REGULAR) and os.path.exists(_MONO_BOLD)
+if _MONO_AVAILABLE:
+    pdfmetrics.registerFont(TTFont("IBMPlexMono", _MONO_REGULAR))
+    pdfmetrics.registerFont(TTFont("IBMPlexMono-Bold", _MONO_BOLD))
+_MONO_FONT = "IBMPlexMono" if _MONO_AVAILABLE else "Courier"
 
 styles = getSampleStyleSheet()
-h1 = ParagraphStyle("h1", parent=styles["Heading1"], textColor=NAVY)
-h2 = ParagraphStyle("h2", parent=styles["Heading2"], textColor=NAVY)
-body = styles["BodyText"]
+h1 = ParagraphStyle("h1", parent=styles["Heading1"], textColor=NAVY_TEXT, fontName="Times-Bold")
+h2 = ParagraphStyle("h2", parent=styles["Heading2"], textColor=NAVY_TEXT, fontName="Times-Bold")
+body = ParagraphStyle("body", parent=styles["BodyText"], fontName="Times-Roman")
+_eyebrow = ParagraphStyle(
+    "eyebrow", parent=styles["Normal"], fontName=_MONO_FONT, fontSize=7.5,
+    textColor=BRASS, alignment=TA_CENTER, spaceAfter=3,
+)
+_header_subtitle = ParagraphStyle(
+    "header_subtitle", parent=styles["Normal"], fontName="Times-Italic",
+    textColor=NAVY_TEXT, alignment=TA_CENTER, fontSize=11, spaceAfter=2,
+)
+_header_address = ParagraphStyle(
+    "header_address", parent=styles["Normal"], fontName=_MONO_FONT,
+    textColor=INK_SOFT, alignment=TA_CENTER, fontSize=7.5,
+)
 
 
 def _company_header(elements, subtitle: str):
-    elements.append(Paragraph("EFICIENCIA Y PRECISIÓN INDUSTRIAL, S.L.", h1))
-    elements.append(Paragraph(subtitle, h2))
-    elements.append(Paragraph("Calle Andrés Eliseo Mañaricua nº 7, Bajo, 48013 Bilbao (Bizkaia)", body))
+    """Cabecera de marca: banner oscuro con el logo (igual que la web),
+    seguida del subtítulo del documento y la dirección, centrados."""
+    if os.path.exists(_LOGO_PATH):
+        logo_img = Image(_LOGO_PATH, width=90 * mm, height=90 * mm * (575 / 1106))
+        logo_img.hAlign = "CENTER"
+        banner = Table([[logo_img]], colWidths=[170 * mm])
+        banner.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, -1), NAVY_DEEP),
+            ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ("TOPPADDING", (0, 0), (-1, -1), 8 * mm),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 8 * mm),
+        ]))
+        elements.append(banner)
+        elements.append(Spacer(1, 5 * mm))
+    else:
+        elements.append(Paragraph("EFICIENCIA Y PRECISIÓN INDUSTRIAL, S.L.", h1))
+
+    elements.append(Paragraph(subtitle, _header_subtitle))
+    elements.append(Paragraph(
+        "CALLE ANDRÉS ELISEO MAÑARICUA Nº 7, BAJO · 48013 BILBAO (BIZKAIA)", _header_address))
     elements.append(Spacer(1, 10 * mm))
 
 
@@ -63,10 +121,33 @@ def generate_client_offer_pdf(offer: ClientOffer, output_path: str) -> str:
 
     elements.append(Paragraph("Parámetros operativos", h2))
     elements.append(Paragraph(
-        f"Fluido: {offer.fluid_name} · Caudal: {offer.flow_m3h} m³/h · "
+        f"Fluido: {offer.fluid_name} · Caudal: {offer.flow_m3h} m3/h · "
         f"Velocidad: {offer.velocity_ms} m/s · TDH: {offer.tdh_m} m.c.f.", body))
 
-    elements.append(Spacer(1, 10 * mm))
+    elements.append(Spacer(1, 4 * mm))
+    try:
+        curve_drawing = build_curve_drawing(
+            offer.pump, operating_flow_m3h=offer.flow_m3h, operating_head_m=offer.tdh_m,
+        )
+        elements.append(curve_drawing)
+        if offer.pump.curve_reference_url:
+            elements.append(Paragraph(
+                f"Curva oficial del fabricante: {offer.pump.curve_reference_url}", body))
+        else:
+            elements.append(Paragraph(
+                "Curva orientativa, calculada a partir del caudal y la altura máximos de "
+                "catálogo de esta bomba (no es la curva exacta publicada por el fabricante).",
+                body))
+    except Exception:
+        pass  # si la generacion de la curva falla, no bloquea el resto de la oferta
+
+    elements.append(Spacer(1, 6 * mm))
+    elements.append(Paragraph(
+        "<b>En caso de aceptación del presupuesto</b>, envíe el pedido oficial a "
+        "<b>pedidos@eficienciayprecisionindustrial.com</b>. Si no recibe confirmación de "
+        "la recepción de su pedido, es posible que este no se haya tramitado — "
+        "por favor, contacte con nosotros en ese caso.", body))
+    elements.append(Spacer(1, 4 * mm))
     elements.append(Paragraph("Propuesta válida durante 30 días naturales.", body))
 
     doc.build(elements)
@@ -90,7 +171,7 @@ def generate_internal_report_pdf(report: InternalReport, output_path: str) -> st
     h = report.hydraulics
     elements.append(Paragraph("Análisis hidráulico", h2))
     elements.append(Paragraph(
-        f"Q={h.flow_m3h} m³/h · v={h.velocity_ms} m/s · Re={h.reynolds:.0f} ({h.flow_regime}) · "
+        f"Q={h.flow_m3h} m3/h · v={h.velocity_ms} m/s · Re={h.reynolds:.0f} ({h.flow_regime}) · "
         f"TDH={h.total_dynamic_head_m} m.c.f. · Motor rec.: {h.recommended_motor_kw} kW", body))
     elements.append(Spacer(1, 6 * mm))
 
@@ -127,6 +208,42 @@ def generate_internal_report_pdf(report: InternalReport, output_path: str) -> st
         ("FONTSIZE", (0, 0), (-1, -1), 8),
     ]))
     elements.append(ftable)
+    elements.append(Spacer(1, 6 * mm))
+
+    p = report.selected_pump
+    elements.append(Paragraph("Bomba seleccionada y razonamiento de tecnología (V7)", h2))
+    elements.append(Paragraph(
+        f"<b>{p.technology.value}</b> — {p.brand} {p.model} "
+        f"(rango {p.min_flow_m3h}-{p.max_flow_m3h} m3/h, {p.max_head_m} m.c.f. máx.)", body))
+    if report.technology_reasoning:
+        for rec in report.technology_reasoning:
+            estado = "✓ APTA" if rec.suitable else "✗ DESCARTADA"
+            elements.append(Paragraph(
+                f"<b>{rec.technology.value}</b> [{estado}, score={rec.score:.2f}]", body))
+            for reason in rec.reasons:
+                elements.append(Paragraph(f"　+ {reason}", body))
+            for warn in rec.warnings:
+                elements.append(Paragraph(f"　! {warn}", body))
+    elements.append(Spacer(1, 6 * mm))
+
+    elements.append(Paragraph("Compatibilidad química fluido/material (V8)", h2))
+    if report.chemical_compatibility:
+        cc = report.chemical_compatibility
+        cuerpo = cc.body_material or "sin dato"
+        elastomero = cc.elastomer_material or "sin dato"
+        if cc.compatible is True:
+            estado_txt = "✓ COMPATIBLE"
+        elif cc.compatible is False:
+            estado_txt = "✗ NO COMPATIBLE — REVISAR ANTES DE OFERTAR"
+        else:
+            estado_txt = "? SIN CONFIRMAR — verificar manualmente"
+        elements.append(Paragraph(
+            f"Fluido: <b>{cc.fluid_name}</b> · Cuerpo: {cuerpo} · Elastómero/junta: {elastomero} · "
+            f"<b>{estado_txt}</b>", body))
+        for w in cc.warnings:
+            elements.append(Paragraph(f"　! {w}", body))
+    else:
+        elements.append(Paragraph("No evaluada.", body))
     elements.append(Spacer(1, 6 * mm))
 
     elements.append(Paragraph("Instrucciones para el ingeniero de proyecto", h2))
@@ -172,6 +289,12 @@ def generate_single_item_offer_pdf(offer: SingleItemOffer, output_path: str) -> 
         "Consulte con nosotros si desea ampliar la oferta al resto de la instalación.",
         body,
     ))
+    elements.append(Spacer(1, 8 * mm))
+    elements.append(Paragraph(
+        "<b>En caso de aceptación del presupuesto</b>, envíe el pedido oficial a "
+        "<b>pedidos@eficienciayprecisionindustrial.com</b>. Si no recibe confirmación de "
+        "la recepción de su pedido, es posible que este no se haya tramitado — "
+        "por favor, contacte con nosotros en ese caso.", body))
 
     doc.build(elements)
     return output_path

@@ -1,6 +1,18 @@
-"""Seed de bombas (3 perfiles) y usuario admin interno."""
+"""Seed de bombas (catalogo real EPi) y usuario admin interno.
+
+V7: el catalogo de 6 bombas de ejemplo se sustituye por el catalogo real
+de EPi (app/db/pumps_catalog.csv), 1.509 bombas de 5 fabricantes (ARO,
+Pompe Cucchi, Sydex, Verderflex, CDR Pompe) con caudal verificado,
+construido a partir de las tarifas 2026 de los proveedores y de las fichas
+tecnicas publicas de cada fabricante. Ver notas de metodologia en el propio
+CSV / conversacion de origen: cada fila incluye caudal min/max, altura
+maxima (derivada de la presion de catalogo), potencia de motor cuando se
+conoce, y una puntuacion (match_score) que es la eficiencia real calculada
+cuando se pudo, o un valor tipico de la tecnologia cuando no.
+"""
 from __future__ import annotations
 
+import csv
 import os
 import sys
 
@@ -12,64 +24,59 @@ from passlib.context import CryptContext
 
 pwd = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
+CATALOG_CSV = os.path.join(os.path.dirname(os.path.abspath(__file__)), "pumps_catalog.csv")
+
+
+def _load_catalog_from_csv(path: str) -> list[PumpModel]:
+    rows = []
+    with open(path, newline="", encoding="utf-8") as f:
+        for row in csv.DictReader(f):
+            rows.append(PumpModel(
+                id=row["id"],
+                brand=row["brand"],
+                model=row["model"],
+                technology=_TECH_LABELS.get(row["technology"], row["technology"]),
+                profile=row["profile"],
+                min_flow_m3h=float(row["min_flow_m3h"]),
+                max_flow_m3h=float(row["max_flow_m3h"]),
+                max_head_m=float(row["max_head_m"]),
+                base_cost_eur=float(row["base_cost_eur"]),
+                is_atex=row["is_atex"].strip().lower() in ("true", "1", "yes"),
+                description=row["description"],
+                recommended_motor_kw=float(row["recommended_motor_kw"]) if row["recommended_motor_kw"] else 1.5,
+                motor_voltage=row["motor_voltage"],
+                match_score=float(row["match_score"]),
+                wetted_body_material=row.get("wetted_body_material") or None,
+                wetted_elastomer_material=row.get("wetted_elastomer_material") or None,
+                curve_reference_url=row.get("curve_reference_url") or None,
+            ))
+    return rows
+
+
+# El CSV guarda el nombre corto del enum (p.ej. "ENGRANAJES"); PumpModel.technology
+# guarda el VALOR textual del enum (p.ej. "Engranajes"), igual que hacia el seed
+# original y que espera pump_row_to_selected() en main.py.
+_TECH_LABELS = {
+    "CENTRIFUGA_MECANICO": "Centrifuga con cierre mecanico",
+    "CENTRIFUGA_MAGNETICO": "Centrifuga de Acoplamiento Magnetico",
+    "NEUMATICA_DOBLE_MEMBRANA": "Neumatica de Doble Membrana",
+    "PERISTALTICA": "Peristaltica",
+    "TORNILLO_HELICOIDAL": "Tornillo Helicoidal",
+    "ENGRANAJES": "Engranajes",
+}
+
 
 def seed():
     Base.metadata.create_all(bind=engine)
     db = SessionLocal()
 
     if not db.query(PumpModel).first():
-        catalog = [
-            PumpModel(
-                id="B-CHEAP-01", brand="Generic Industrial", model="GI-C 40-125",
-                technology="Centrifuga con cierre mecanico", profile="BARATA",
-                min_flow_m3h=5.0, max_flow_m3h=30.0, max_head_m=30.0,
-                base_cost_eur=2800.0, is_atex=False,
-                description="Materiales estandar, eficiencia basica.",
-                recommended_motor_kw=1.5, match_score=0.70,
-            ),
-            PumpModel(
-                id="EPI-MAG-PRO-40-160", brand="Finish Thompson (FTI)", model="EPI-MAG-PRO 40-160",
-                technology="Centrifuga de Acoplamiento Magnetico", profile="CALIDAD_PRECIO",
-                min_flow_m3h=5.0, max_flow_m3h=40.0, max_head_m=35.0,
-                base_cost_eur=5100.0, is_atex=False,
-                description="Fugas cero. Estanqueidad absoluta para fluidos toxicos, sosa o corrosivos.",
-                recommended_motor_kw=1.5, match_score=0.94,
-            ),
-            PumpModel(
-                id="B-QP-02", brand="KSB", model="Etabloc 050-032-160",
-                technology="Centrifuga con cierre mecanico", profile="CALIDAD_PRECIO",
-                min_flow_m3h=10.0, max_flow_m3h=60.0, max_head_m=35.0,
-                base_cost_eur=4200.0, is_atex=True,
-                description="Componentes reforzados, sellados de alta gama.",
-                recommended_motor_kw=2.2, match_score=0.88,
-            ),
-            PumpModel(
-                id="B-PREM-01", brand="Sundyne", model="ANTARES Mag-Drive 50",
-                technology="Centrifuga de Acoplamiento Magnetico", profile="PREMIUM",
-                min_flow_m3h=5.0, max_flow_m3h=50.0, max_head_m=50.0,
-                base_cost_eur=9800.0, is_atex=True,
-                description="Tecnologia de vanguardia, alta resistencia quimica/mecanica.",
-                recommended_motor_kw=2.2, match_score=0.96,
-            ),
-            PumpModel(
-                id="B-PREM-02", brand="Verder", model="Verderflex VF65",
-                technology="Peristaltica", profile="PREMIUM",
-                min_flow_m3h=0.5, max_flow_m3h=20.0, max_head_m=25.0,
-                base_cost_eur=7500.0, is_atex=True,
-                description="Dosificacion de alta precision, fluidos sensibles al cizallamiento.",
-                recommended_motor_kw=1.5, match_score=0.85,
-            ),
-            PumpModel(
-                id="B-CHEAP-02", brand="Tapflo", model="T100",
-                technology="Neumatica de Doble Membrana", profile="BARATA",
-                min_flow_m3h=1.0, max_flow_m3h=15.0, max_head_m=80.0,
-                base_cost_eur=1200.0, is_atex=True,
-                description="Neumatica economica para fluidos viscosos o ATEX.",
-                recommended_motor_kw=0.0, match_score=0.65,
-            ),
-        ]
-        db.add_all(catalog)
-        print(f"Insertadas {len(catalog)} bombas.")
+        if os.path.exists(CATALOG_CSV):
+            catalog = _load_catalog_from_csv(CATALOG_CSV)
+            db.add_all(catalog)
+            print(f"Insertadas {len(catalog)} bombas desde el catalogo real (pumps_catalog.csv).")
+        else:
+            print(f"AVISO: no se encontro {CATALOG_CSV}; no se ha insertado ninguna bomba.")
     else:
         print("Catalogo de bombas ya existe.")
 

@@ -27,6 +27,11 @@ class PumpModel(Base):
     recommended_motor_kw = Column(Float, default=1.5)
     motor_voltage = Column(String, default="Trifasico 400V")
     match_score = Column(Float, default=0.8)
+    # NUEVO (V8): material en contacto con el fluido, para compatibilidad quimica.
+    wetted_body_material = Column(String, nullable=True)
+    wetted_elastomer_material = Column(String, nullable=True)
+    # NUEVO (V9): enlace a la curva oficial del fabricante, cuando se localice.
+    curve_reference_url = Column(String, nullable=True)
 
 
 class UserModel(Base):
