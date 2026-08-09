@@ -86,7 +86,11 @@ def send_offer_email(
             if user and password:
                 server.login(user, password)
             server.send_message(msg)
+        print(f"Email de oferta enviado correctamente a {to_email}")
         return True
-    except Exception:
-        # No tumbar la generacion de la oferta si falla el envio de correo.
+    except Exception as e:
+        # No tumbar la generacion de la oferta si falla el envio de correo,
+        # pero SI dejar constancia en los logs del motivo exacto del fallo
+        # (antes este bloque lo atrapaba en silencio y era invisible).
+        print(f"ERROR enviando email de oferta a {to_email}: {type(e).__name__}: {e}")
         return False
