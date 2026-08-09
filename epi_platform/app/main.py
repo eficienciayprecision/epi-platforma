@@ -56,9 +56,22 @@ from app.services.vision_service import identify_object_from_image
 
 Base.metadata.create_all(bind=engine)
 
+# NUEVO (fix agosto 2026): antes el catalogo de bombas solo se cargaba si
+# alguien ejecutaba "python -m app.db.seed" a mano (via Shell de Render).
+# El plan gratuito de Render no tiene Shell, asi que nunca se llegaba a
+# cargar el catalogo real de 1.509 bombas — la app se quedaba con las 6 de
+# ejemplo (o vacia, si la base de datos es efimera). Se ejecuta aqui, en
+# cada arranque: es seguro y rapido llamarlo siempre porque internamente ya
+# comprueba si el catalogo esta cargado y no hace nada si ya lo esta.
+try:
+    from app.db.seed import seed as _seed_database
+    _seed_database()
+except Exception as _seed_error:  # nunca debe impedir que la app arranque
+    print(f"AVISO: no se pudo cargar el catalogo de bombas al arrancar: {_seed_error}")
+
 app = FastAPI(
     title="EPi Engine API",
-    version="1.7.0",
+    version="1.7.1",
     description="Asistente IA para mecanica de fluidos — EPI S.L. Bilbao",
 )
 app.add_middleware(
@@ -302,7 +315,7 @@ class PumpSelectRequest(BaseModel):
 
 @app.get("/health", tags=["System"])
 def health():
-    return {"status": "ok", "system": "EPi Platform", "version": "1.7.0"}
+    return {"status": "ok", "system": "EPi Platform", "version": "1.7.1"}
 
 
 @app.get("/", tags=["System"])

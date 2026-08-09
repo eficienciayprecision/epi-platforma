@@ -1,6 +1,38 @@
 # EPi Platform — Eficiencia y Precisión Industrial S.L.
 
-## NUEVO en esta revisión (V11): identidad visual EXACTA (a partir del HTML real de la web)
+## FIX CRÍTICO (1.7.1, agosto 2026): el catálogo real nunca se cargaba solo
+
+Detectado en producción: la base de datos seguía con las 6 bombas de
+ejemplo de la V6 después de desplegar hasta la V11. Causa raíz, dos fallos
+combinados:
+
+1. **Nada llamaba a `seed()` automáticamente.** Ni el `Dockerfile`, ni
+   `main.py`, ni Render — había que ejecutar `python -m app.db.seed` a
+   mano por Shell. El plan gratuito de Render no tiene Shell, así que
+   nunca se pudo ejecutar.
+2. Aunque se hubiera podido ejecutar, `seed()` solo insertaba el catálogo
+   **si la tabla estaba completamente vacía** (`if not
+   db.query(PumpModel).first()`). Como ya tenía las 6 bombas de ejemplo
+   antiguas, esa condición era falsa y nunca las habría sustituido.
+
+**Solución aplicada:**
+- `app/main.py` ahora llama a `seed()` automáticamente en cada arranque
+  (justo después de crear las tablas). Envuelto en `try/except` para que un
+  fallo de seed nunca impida arrancar la aplicación.
+- `app/db/seed.py` ya no comprueba "¿está vacía la tabla?" sino "¿el número
+  de bombas coincide con el CSV actual?". Si no coincide (catálogo antiguo,
+  vacío, o el CSV se ha actualizado con más/menos bombas en una futura
+  versión), sustituye la tabla entera por el contenido del CSV. Si coincide,
+  no hace nada — arranque rápido, sin tocar la base de datos en cada
+  reinicio normal.
+
+Con esto, cualquier despliegue futuro (subir código nuevo a GitHub →
+redeploy en Render) actualiza el catálogo de bombas solo, sin depender de
+Shell ni de que alguien se acuerde de ejecutar nada a mano.
+
+---
+
+## De la V11: identidad visual EXACTA (a partir del HTML real de la web)
 
 Corrección sobre la V10: aquella versión se basó en fotos/capturas de la
 marca (colores aproximados por análisis de imagen). En esta, Jon subió el

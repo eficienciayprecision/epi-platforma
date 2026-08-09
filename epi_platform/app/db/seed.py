@@ -70,15 +70,24 @@ def seed():
     Base.metadata.create_all(bind=engine)
     db = SessionLocal()
 
-    if not db.query(PumpModel).first():
-        if os.path.exists(CATALOG_CSV):
-            catalog = _load_catalog_from_csv(CATALOG_CSV)
-            db.add_all(catalog)
-            print(f"Insertadas {len(catalog)} bombas desde el catalogo real (pumps_catalog.csv).")
-        else:
-            print(f"AVISO: no se encontro {CATALOG_CSV}; no se ha insertado ninguna bomba.")
+def seed():
+    Base.metadata.create_all(bind=engine)
+    db = SessionLocal()
+
+    catalog = _load_catalog_from_csv(CATALOG_CSV) if os.path.exists(CATALOG_CSV) else []
+    current_count = db.query(PumpModel).count()
+
+    if not catalog:
+        print(f"AVISO: no se encontro {CATALOG_CSV}; el catalogo actual ({current_count} bombas) no se ha tocado.")
+    elif current_count != len(catalog):
+        # El numero de filas no coincide con el CSV actual (catalogo antiguo,
+        # de ejemplo, o desactualizado tras una actualizacion) -> se sustituye
+        # entero por el del CSV, que es siempre la fuente de verdad.
+        db.query(PumpModel).delete()
+        db.add_all(catalog)
+        print(f"Catalogo de bombas actualizado: {current_count} bombas antiguas sustituidas por {len(catalog)} nuevas.")
     else:
-        print("Catalogo de bombas ya existe.")
+        print(f"Catalogo de bombas ya esta actualizado ({current_count} bombas).")
 
     if not db.query(UserModel).first():
         hash_pw = pwd.hash(os.getenv("EPI_ADMIN_SEED_PASSWORD", "changeme-2026"))
