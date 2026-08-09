@@ -74,33 +74,43 @@ def seed():
     Base.metadata.create_all(bind=engine)
     db = SessionLocal()
 
+    # PASO 1: catalogo de bombas. Se guarda (commit) de inmediato, ANTES de
+    # tocar los usuarios internos — si algo falla mas adelante (como paso
+    # con la creacion de usuarios en agosto 2026, un problema de version
+    # entre passlib y bcrypt), el catalogo de bombas ya esta a salvo en la
+    # base de datos y no se pierde con el resto de la transaccion.
     catalog = _load_catalog_from_csv(CATALOG_CSV) if os.path.exists(CATALOG_CSV) else []
     current_count = db.query(PumpModel).count()
 
     if not catalog:
         print(f"AVISO: no se encontro {CATALOG_CSV}; el catalogo actual ({current_count} bombas) no se ha tocado.")
     elif current_count != len(catalog):
-        # El numero de filas no coincide con el CSV actual (catalogo antiguo,
-        # de ejemplo, o desactualizado tras una actualizacion) -> se sustituye
-        # entero por el del CSV, que es siempre la fuente de verdad.
         db.query(PumpModel).delete()
         db.add_all(catalog)
+        db.commit()
         print(f"Catalogo de bombas actualizado: {current_count} bombas antiguas sustituidas por {len(catalog)} nuevas.")
     else:
         print(f"Catalogo de bombas ya esta actualizado ({current_count} bombas).")
 
-    if not db.query(UserModel).first():
-        hash_pw = pwd.hash(os.getenv("EPI_ADMIN_SEED_PASSWORD", "changeme-2026"))
-        users = [
-            UserModel(username="admin", full_name="Administrador EPI", role="admin", hashed_password=hash_pw),
-            UserModel(username="ingeniero", full_name="Ingeniero de Proyecto", role="engineer", hashed_password=hash_pw),
-        ]
-        db.add_all(users)
-        print("Insertados usuarios internos (admin, ingeniero). Cambia la contraseña por defecto.")
-    else:
-        print("Usuarios internos ya existen.")
+    # PASO 2: usuarios internos. Aislado en su propio try/except: un fallo
+    # aqui (p.ej. de compatibilidad de bcrypt) no debe poder deshacer ni
+    # bloquear el paso 1, que ya quedo guardado.
+    try:
+        if not db.query(UserModel).first():
+            hash_pw = pwd.hash(os.getenv("EPI_ADMIN_SEED_PASSWORD", "changeme-2026"))
+            users = [
+                UserModel(username="admin", full_name="Administrador EPI", role="admin", hashed_password=hash_pw),
+                UserModel(username="ingeniero", full_name="Ingeniero de Proyecto", role="engineer", hashed_password=hash_pw),
+            ]
+            db.add_all(users)
+            db.commit()
+            print("Insertados usuarios internos (admin, ingeniero). Cambia la contraseña por defecto.")
+        else:
+            print("Usuarios internos ya existen.")
+    except Exception as user_seed_error:
+        db.rollback()
+        print(f"AVISO: no se pudieron crear los usuarios internos (el catalogo de bombas SI se guardo bien): {user_seed_error}")
 
-    db.commit()
     db.close()
     print("Seed completado.")
 

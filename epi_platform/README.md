@@ -1,6 +1,27 @@
 # EPi Platform — Eficiencia y Precisión Industrial S.L.
 
-## FIX CRÍTICO (1.7.1, agosto 2026): el catálogo real nunca se cargaba solo
+## FIX CRÍTICO 2 (1.7.2, agosto 2026): las bombas se preparaban pero nunca se guardaban
+
+Encontrado en los logs reales de Render tras el fix 1.7.1: el catálogo de
+1.509 bombas SÍ se cargaba en cada arranque, pero un fallo posterior en la
+creación de usuarios internos (incompatibilidad de versión entre
+`passlib` y `bcrypt`: `password cannot be longer than 72 bytes`) ocurría
+ANTES del único `db.commit()` de toda la función `seed()` — así que ese
+fallo deshacía también el guardado de las bombas, aunque el mensaje de
+consola dijera "1509 nuevas". Nunca llegaban a la base de datos real.
+
+**Dos fixes:**
+1. `requirements.txt`: se fija `bcrypt==4.0.1` (la última versión
+   compatible con `passlib==1.7.4`) — causa raíz del error de hashing.
+2. `app/db/seed.py`: el guardado del catálogo de bombas y el de los
+   usuarios internos ahora son dos pasos independientes, cada uno con su
+   propio `commit()`. Un fallo en el paso de usuarios (por bcrypt o
+   cualquier otra cosa en el futuro) ya no puede deshacer el catálogo de
+   bombas, que se guarda primero y de forma aislada.
+
+---
+
+## FIX CRÍTICO 1 (1.7.1, agosto 2026): el catálogo real nunca se cargaba solo
 
 Detectado en producción: la base de datos seguía con las 6 bombas de
 ejemplo de la V6 después de desplegar hasta la V11. Causa raíz, dos fallos
