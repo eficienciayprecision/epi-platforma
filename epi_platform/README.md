@@ -1,5 +1,28 @@
 # EPi Platform — Eficiencia y Precisión Industrial S.L.
 
+## FIX 1.8.1 (agosto 2026): la base de datos no persistía + URL de Postgres de Render
+
+Detectado tras revisar los logs de producción: los mensajes de arranque
+mostraban "0 bombas antiguas sustituidas por 1509 nuevas" en CADA reinicio,
+en vez de "ya está actualizado" a partir del segundo arranque. Eso
+confirmaba que la base de datos era efímera (sin `DATABASE_URL` apuntando
+a un Postgres real, se usa un SQLite local que vive solo dentro del
+contenedor) — no solo el catálogo de bombas se reconstruía cada vez, TODO
+se perdía en cada reinicio: usuarios internos y, más importante, los leads
+(consultas/presupuestos) de clientes reales.
+
+**Solución**: crear una base de datos PostgreSQL en Render (gratuita para
+empezar) y apuntar `DATABASE_URL` a ella. De paso, arreglado un problema
+que habría impedido que funcionara: Render entrega la URL con el prefijo
+`postgres://`, que SQLAlchemy 2.x ya no reconoce como dialecto válido
+(hace falta `postgresql://`) — `app/db/database.py` ahora reescribe el
+prefijo automáticamente si hace falta, así que la URL de Render se puede
+pegar tal cual.
+
+**Aviso para Jon**: el plan gratuito de PostgreSQL en Render caduca a los
+90 días — para no perder el histórico de clientes en ese plazo, pasar a un
+plan de pago antes de esa fecha (o hacer copias de seguridad periódicas).
+
 ## FIX 1.8.0 (agosto 2026): la entrevista repreguntaba datos ya dados
 
 Detectado por Jon en producción: si el cliente daba todos los datos juntos
