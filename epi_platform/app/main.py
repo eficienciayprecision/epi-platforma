@@ -75,7 +75,7 @@ except Exception as _seed_error:  # nunca debe impedir que la app arranque
 
 app = FastAPI(
     title="EPi Engine API",
-    version="1.9.9",
+    version="1.10.0",
     description="Asistente IA para mecanica de fluidos — EPI S.L. Bilbao",
 )
 app.add_middleware(
@@ -330,7 +330,7 @@ class PumpSelectRequest(BaseModel):
 
 @app.get("/health", tags=["System"])
 def health():
-    return {"status": "ok", "system": "EPi Platform", "version": "1.9.9"}
+    return {"status": "ok", "system": "EPi Platform", "version": "1.10.0"}
 
 
 @app.get("/", tags=["System"])
@@ -518,6 +518,19 @@ def client_pdf(solution: EPiFullSolution):
     return FileResponse(path, filename=path.name, media_type="application/pdf")
 
 
+@app.get("/api/v1/download/{filename}", tags=["Cliente — Oferta"])
+def download_generated_file(filename: str):
+    """NUEVO — descarga generica de un PDF ya generado en el servidor (p.ej.
+    ofertas de repuesto o de equipo de adhesivo, que no se regeneran al
+    vuelo como la oferta cliente principal). Solo nombres de archivo sueltos
+    (sin rutas) dentro de OUTPUT_DIR, para evitar salir de esa carpeta."""
+    safe_name = Path(filename).name  # descarta cualquier componente de ruta
+    path = OUTPUT_DIR / safe_name
+    if not path.exists() or not path.is_file():
+        raise HTTPException(status_code=404, detail="Archivo no encontrado (puede haber expirado).")
+    return FileResponse(path, filename=path.name, media_type="application/pdf")
+
+
 @app.post("/api/v1/report/internal-pdf", tags=["Interno — Documentos"])
 def internal_pdf(solution: EPiFullSolution, _: User = Depends(require_staff)):
     """Solo personal interno. El cliente nunca ve este documento."""
@@ -691,6 +704,7 @@ def photo_quote_item(request: ItemQuoteRequest, db: Session = Depends(get_db)):
         "solution": solution.model_dump(),
         "item_matched_in_catalog": found["matched"],
         "client_pdf": str(client_path),
+        "download_url": f"/api/v1/download/{client_path.name}",
         "internal_pdf": str(internal_path),
         "lead_id": lead.id,
         "email_sent": email_sent,
@@ -780,6 +794,7 @@ def oferta_repuesto(request: SparePartQuoteRequest, db: Session = Depends(get_db
     return {
         "offer": offer.model_dump(),
         "client_pdf": str(client_path),
+        "download_url": f"/api/v1/download/{client_path.name}",
         "email_sent": email_sent,
     }
 
@@ -913,7 +928,7 @@ def adhesive_oferta(request: AdhesiveOfferRequest, db: Session = Depends(get_db)
     db.add(lead)
     db.commit()
 
-    return {"offer": offer.model_dump(), "client_pdf": str(client_path), "email_sent": email_sent}
+    return {"offer": offer.model_dump(), "client_pdf": str(client_path), "download_url": f"/api/v1/download/{client_path.name}", "email_sent": email_sent}
 
 
 @app.post("/api/v1/adhesive/seguimiento", tags=["Cliente — Instalacion de adhesivo"])

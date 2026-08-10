@@ -1,5 +1,37 @@
 # EPi Platform — Eficiencia y Precisión Industrial S.L.
 
+## FIX 1.10.0 (agosto 2026): la oferta de repuestos (y adhesivo) no se podía descargar
+
+Jon confirmó que la entrevista principal ya funciona bien de punta a
+punta. Pero al usar "Buscar un repuesto", la oferta se generaba pero no
+había forma de descargarla ni confirmación real de envío por email.
+
+**Causa real, confirmada revisando el código (no solo el de repuestos)**:
+nunca existió un endpoint para descargar los PDF que no se regeneran al
+vuelo. La oferta cliente principal se descarga con `/api/v1/report/client-pdf`,
+que reconstruye el PDF a partir de los datos de la solución — pero
+repuestos, elemento individual y equipo de adhesivo generan el PDF una
+vez y lo guardan en el servidor, y el frontend nunca tenía ningún enlace
+o botón para pedirlo de vuelta. Es decir: el PDF SÍ se generaba
+correctamente, simplemente no había manera de acceder a él desde la
+interfaz — no era solo un problema del email.
+
+**Arreglo**: nuevo endpoint `GET /api/v1/download/{filename}` que sirve
+cualquier PDF ya generado en el servidor (con protección para que solo
+pueda acceder a archivos sueltos de esa carpeta, nunca salir de ella).
+Los tres endpoints afectados (repuestos, elemento individual, equipo de
+adhesivo) ahora devuelven `download_url`, y el frontend muestra un botón
+real "Descargar PDF" en vez del texto suelto "PDF generado." que no
+llevaba a ningún sitio.
+
+**Sobre el email de repuestos**: usa exactamente la misma función
+(`send_offer_email`) que la entrevista principal, que Jon confirma que ya
+funciona — así que lo más probable es que en esa prueba concreta no
+hubiera email puesto en "Tus datos", o se confundiera con el problema de
+la descarga (sin nada que mostrar, parecía que "no había hecho nada").
+Pendiente de confirmar en la próxima prueba, ahora que la descarga sí
+funciona y se ve claramente si dice "Oferta enviada a tu email" o no.
+
 ## FIX 1.9.9 (agosto 2026): punto ciego en los logs del email (email sigue sin enviarse)
 
 Jon confirmó: puso su email en "Tus datos" y aun así el resultado fue

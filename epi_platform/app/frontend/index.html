@@ -576,7 +576,8 @@
             resultBox.innerHTML = `<p style='color:#b00'>Error: ${data.detail || "no se pudo generar la oferta"}</p>`;
           } else {
             resultBox.innerHTML = `<p><b>Precio total: ${data.offer.final_price_eur.toFixed(2)} €</b></p>`
-              + `<p style="font-size:0.85rem;color:var(--gray)">${data.email_sent ? "Oferta enviada a tu email." : "PDF generado."}</p>`;
+              + `<p style="font-size:0.85rem;color:var(--gray)">${data.email_sent ? "Oferta enviada a tu email." : "Genera el PDF y descárgalo abajo."}</p>`
+              + `<a class="outline" style="display:inline-block;margin-top:4px;text-decoration:none;padding:8px 14px;border-radius:6px" href="${API}${data.download_url}" target="_blank">Descargar PDF</a>`;
           }
         }
       } catch (e) {
@@ -667,7 +668,8 @@
           return;
         }
         outputBox.innerHTML = `<p><b>Precio total: ${data.offer.final_price_eur.toFixed(2)} €</b></p>`
-          + `<p style="font-size:0.85rem;color:var(--gray)">${data.email_sent ? "Oferta enviada a tu email." : "PDF generado."}</p>`;
+          + `<p style="font-size:0.85rem;color:var(--gray)">${data.email_sent ? "Oferta enviada a tu email." : "Genera el PDF y descárgalo abajo."}</p>`
+          + `<a class="outline" style="display:inline-block;margin-top:4px;text-decoration:none;padding:8px 14px;border-radius:6px" href="${API}${data.download_url}" target="_blank">Descargar PDF</a>`;
       } catch (e) {
         outputBox.innerHTML = "<p style='color:#b00'>Error generando la oferta.</p>";
       }
