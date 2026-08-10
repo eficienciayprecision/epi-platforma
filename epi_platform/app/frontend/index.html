@@ -266,6 +266,14 @@
           <button id="sendBtn">Enviar</button>
         </div>
         <p class="status" id="chatStatus"></p>
+        <div id="adhesiveProfileChoice" style="display:none;margin-top:10px">
+          <label style="display:block;font-size:0.8rem;color:var(--gray);margin-bottom:4px">Perfil de inversión (bomba de pistón)</label>
+          <label style="font-size:0.85rem;margin-right:12px"><input type="radio" name="adhesiveProfile" value="BARATA" /> Barata</label>
+          <label style="font-size:0.85rem;margin-right:12px"><input type="radio" name="adhesiveProfile" value="CALIDAD_PRECIO" checked /> Calidad-Precio</label>
+          <label style="font-size:0.85rem"><input type="radio" name="adhesiveProfile" value="PREMIUM" /> Premium</label>
+        </div>
+        <button class="gold" id="adhesiveGoBtn" style="display:none;margin-top:10px">Generar oferta / Enviar seguimiento</button>
+        <div id="adhesiveResult"></div>
       </div>
     </div>
 
@@ -305,6 +313,7 @@
     const API = window.location.origin;
     let history = [];
     let lastData = null;
+    let adhesiveData = null;
     let mode = null; // "interview" | "efficiency" | "adhesive"
 
     // Configuracion de cada rama del menu inicial.
@@ -366,6 +375,10 @@
       const cfg = MODES[key];
       history = [];
       lastData = null;
+      adhesiveData = null;
+      document.getElementById("adhesiveGoBtn").style.display = "none";
+      document.getElementById("adhesiveProfileChoice").style.display = "none";
+      document.getElementById("adhesiveResult").innerHTML = "";
       chat.innerHTML = "";
       goBtn.disabled = true;
       document.getElementById("result").style.display = "none";
@@ -437,6 +450,13 @@
           history.push({ role: "assistant", content: data.message });
           document.getElementById("chatStatus").className = "status ok";
           document.getElementById("chatStatus").textContent = "";
+          if (mode === "adhesive" && data.data) {
+            adhesiveData = data.data;
+            const btn = document.getElementById("adhesiveGoBtn");
+            btn.style.display = "inline-block";
+            btn.textContent = adhesiveData.is_2k ? "Enviar seguimiento" : "Generar oferta";
+            document.getElementById("adhesiveProfileChoice").style.display = adhesiveData.is_2k ? "none" : "block";
+          }
         } else {
           addMsg(data.message || "Error", "bot");
         }
@@ -515,6 +535,55 @@
     sendBtn.onclick = sendChat;
     msgInput.addEventListener("keydown", e => { if (e.key === "Enter") sendChat(); });
     goBtn.onclick = oneshot;
+
+    // NUEVO — boton de cierre del modo adhesivo: oferta con precio (1K) o
+    // envio de seguimiento sin precio (2K).
+    document.getElementById("adhesiveGoBtn").addEventListener("click", async () => {
+      if (!adhesiveData) return;
+      const btn = document.getElementById("adhesiveGoBtn");
+      const resultBox = document.getElementById("adhesiveResult");
+      btn.disabled = true;
+      resultBox.innerHTML = "<p style='color:var(--gray);font-size:0.85rem'>Enviando...</p>";
+      try {
+        let r, data;
+        if (adhesiveData.is_2k) {
+          r = await fetch(API + "/api/v1/adhesive/seguimiento", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ raw_answers: adhesiveData.raw_answers, contact: getContact() }),
+          });
+          data = await r.json();
+          resultBox.innerHTML = data.email_sent
+            ? "<p style='color:var(--gray);font-size:0.85rem'>Le hemos enviado un correo de confirmación — un ingeniero le contactará en breve.</p>"
+            : "<p style='color:var(--gray);font-size:0.85rem'>Datos registrados. Deja tu email en «Tus datos» para recibir la confirmación por correo.</p>";
+        } else {
+          r = await fetch(API + "/api/v1/adhesive/oferta", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              application_type: adhesiveData.application_type,
+              profile: (document.querySelector('input[name="adhesiveProfile"]:checked') || {}).value || "CALIDAD_PRECIO",
+              is_viscous: adhesiveData.is_viscous,
+              drum_liters: adhesiveData.drum_liters,
+              hose_meters: adhesiveData.hose_meters,
+              needs_photocell: adhesiveData.needs_photocell,
+              needs_solenoid: adhesiveData.needs_solenoid,
+              contact: getContact(),
+            }),
+          });
+          data = await r.json();
+          if (!r.ok) {
+            resultBox.innerHTML = `<p style='color:#b00'>Error: ${data.detail || "no se pudo generar la oferta"}</p>`;
+          } else {
+            resultBox.innerHTML = `<p><b>Precio total: ${data.offer.final_price_eur.toFixed(2)} €</b></p>`
+              + `<p style="font-size:0.85rem;color:var(--gray)">${data.email_sent ? "Oferta enviada a tu email." : "PDF generado."}</p>`;
+          }
+        }
+      } catch (e) {
+        resultBox.innerHTML = "<p style='color:#b00'>Error de conexión.</p>";
+      }
+      btn.disabled = false;
+    });
 
     document.querySelectorAll(".menu-btn[data-mode]").forEach(btn => {
       btn.addEventListener("click", () => {

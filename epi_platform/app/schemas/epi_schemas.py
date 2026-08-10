@@ -25,6 +25,12 @@ class PumpTechnology(str, Enum):
     PERISTALTICA = "Peristaltica"
     TORNILLO_HELICOIDAL = "Tornillo Helicoidal"
     ENGRANAJES = "Engranajes"
+    # NUEVO — bomba de piston neumatica (ARO 4-ball / AFX y similares): NO es
+    # una neumatica de doble membrana aunque tambien funcione con aire
+    # comprimido. Se detecto en agosto 2026 que 297 referencias ARO estaban
+    # mal clasificadas como NEUMATICA_DOBLE_MEMBRANA cuando en realidad son
+    # de piston — mecanicamente distintas (ver README).
+    PISTON_NEUMATICO = "Pistón Neumático"
 
 
 # ---------------------------------------------------------------------------
@@ -261,6 +267,46 @@ class SparePartOffer(BaseModel):
     quantity: float
     unit_price_eur: float
     final_price_eur: float
+    contact: Optional[ContactInfo] = None
+
+
+class AdhesiveEquipmentItem(BaseModel):
+    """NUEVO — un elemento de la oferta de equipo de adhesivo (con referencia real)."""
+    elemento: str
+    referencia: str
+    fabricante: str
+    precio_eur: float
+
+
+class AdhesiveEquipmentOffer(BaseModel):
+    """NUEVO — oferta de equipo de aplicacion de adhesivo 1K (pistola/automatismo +
+    elevador de bidon), con referencia y precio de cada elemento."""
+    application_type: str  # "manual" | "automatica"
+    profile: str = "CALIDAD_PRECIO"
+    drum_liters: Optional[float] = None
+    hose_meters: Optional[float] = None
+    items: List[AdhesiveEquipmentItem]
+    final_price_eur: float
+    contact: Optional[ContactInfo] = None
+
+
+class AdhesiveFollowupRequest(BaseModel):
+    """NUEVO — para 2K: no se oferta con precio, se recogen los datos y se
+    avisa al cliente de que un ingeniero le contactara."""
+    raw_answers: List[str]
+    contact: Optional[ContactInfo] = None
+
+
+class AdhesiveOfferRequest(BaseModel):
+    """NUEVO — para 1K: datos ya recogidos por AdhesiveAgent, listos para
+    generar la oferta de equipo con precio."""
+    application_type: str  # "manual" | "automatica"
+    profile: str = "CALIDAD_PRECIO"  # BARATA | CALIDAD_PRECIO | PREMIUM (bomba de piston)
+    is_viscous: bool = False  # True -> bomba de clapetas (chop-check) en vez de bolas
+    drum_liters: Optional[float] = None
+    hose_meters: Optional[float] = None
+    needs_photocell: bool = False
+    needs_solenoid: bool = False
     contact: Optional[ContactInfo] = None
 
 

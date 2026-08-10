@@ -71,6 +71,7 @@ _TYPICAL_EFFICIENCY = {
     PumpTechnology.CENTRIFUGA_MECANICO: 0.70,
     PumpTechnology.CENTRIFUGA_MAGNETICO: 0.68,
     PumpTechnology.ENGRANAJES: 0.70,
+    PumpTechnology.PISTON_NEUMATICO: 0.35,
 }
 
 # Coste relativo tipico (para puntuar el encaje con el perfil BARATA/PREMIUM)
@@ -81,6 +82,7 @@ _RELATIVE_COST = {
     PumpTechnology.CENTRIFUGA_MECANICO: 2,
     PumpTechnology.ENGRANAJES: 3,
     PumpTechnology.CENTRIFUGA_MAGNETICO: 4,  # mas cara (estanqueidad total)
+    PumpTechnology.PISTON_NEUMATICO: 2,
 }
 
 
@@ -192,6 +194,38 @@ class PumpTechnologyAdvisor:
                         )
                 if req.viscosity_cp > 50:
                     reasons.append("Buen comportamiento con fluidos viscosos.")
+
+            elif tech == PumpTechnology.PISTON_NEUMATICO:
+                # Bomba de piston de aire (tipo ARO 4-ball/AFX): pensada para
+                # trasegar fluidos de media/alta viscosidad (pinturas, colas,
+                # adhesivos, lacas) directamente desde bidon, con un
+                # comportamiento de caudal bastante mas continuo que una
+                # neumatica de doble membrana (varias bolas de retencion
+                # amortiguan el pulso). Como la AODD, funciona con aire
+                # comprimido -> no necesita electricidad, apta en ATEX.
+                if req.viscosity_cp > 50:
+                    reasons.append(
+                        "Diseñada para fluidos de media/alta viscosidad (pinturas, "
+                        "colas, adhesivos) trasegados directamente desde bidon."
+                    )
+                if not req.requires_continuous_flow or req.viscosity_cp > 50:
+                    reasons.append(
+                        "Caudal bastante mas continuo que una neumatica de doble "
+                        "membrana (varias bolas de retencion amortiguan el pulso)."
+                    )
+                reasons.append("No necesita electricidad: apta en zona ATEX sin instalacion electrica.")
+                if req.is_abrasive:
+                    warnings.append(
+                        "Tolera algo de abrasion (recubrimiento ceramico en el eje/cilindro "
+                        "de muchos modelos), pero para abrasivos importantes una peristaltica "
+                        "o un tornillo helicoidal desgastan menos."
+                    )
+                if req.has_solids:
+                    suitable = False
+                    warnings.append(
+                        "Las valvulas de bola de la bomba de piston pueden atascarse con "
+                        "solidos en suspension de tamaño apreciable."
+                    )
 
             # --- Puntuacion ---
             score = _TYPICAL_EFFICIENCY[tech] * 0.5

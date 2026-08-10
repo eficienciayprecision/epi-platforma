@@ -153,3 +153,55 @@ def send_internal_report_email(
     except Exception as e:
         print(f"ERROR enviando email de informe interno a {to_email}: {type(e).__name__}: {e}")
         return False
+
+
+def send_adhesive_followup_email(
+    to_email: str,
+    contact_name: Optional[str],
+    company_name: Optional[str],
+    raw_answers: list,
+) -> bool:
+    """NUEVO — adhesivo de 2 componentes: no se genera oferta con precio
+    automatica. Se envia al cliente un correo confirmando que un ingeniero
+    de EPI le contactara, con los datos recogidos como referencia."""
+    host = os.getenv("EPI_SMTP_HOST")
+    if not host:
+        return False
+
+    port = int(os.getenv("EPI_SMTP_PORT", "587"))
+    user = os.getenv("EPI_SMTP_USER")
+    password = os.getenv("EPI_SMTP_PASSWORD")
+    use_tls = os.getenv("EPI_SMTP_USE_TLS", "true").lower() == "true"
+    mail_from = os.getenv("EPI_MAIL_FROM", user or "epi@eficienciayprecisionindustrial.com")
+
+    saludo = contact_name or (company_name or "")
+    datos_txt = "\n".join(f"- {a}" for a in raw_answers)
+
+    msg = EmailMessage()
+    msg["Subject"] = "Su consulta de dosificación de adhesivo — Eficiencia y Precisión Industrial (EPi)"
+    msg["From"] = mail_from
+    msg["To"] = to_email
+    cuerpo = (
+        f"Estimado/a {saludo},\n\n"
+        "Gracias por su consulta sobre su instalación de dosificación de adhesivo de dos "
+        "componentes. Al tratarse de una aplicación 2K, un ingeniero de Eficiencia y "
+        "Precisión Industrial S.L. se pondrá en contacto con usted a la mayor brevedad "
+        "posible para comentar los datos y hacerle llegar la oferta.\n\n"
+        "Datos recogidos en la consulta:\n" + datos_txt + "\n\n"
+        "Quedamos a su disposición para cualquier aclaración.\n\n"
+        "Un saludo,\nEficiencia y Precisión Industrial, S.L.\nBilbao (Bizkaia)"
+    )
+    msg.set_content(cuerpo)
+
+    try:
+        with smtplib.SMTP(host, port, timeout=15) as server:
+            if use_tls:
+                server.starttls()
+            if user and password:
+                server.login(user, password)
+            server.send_message(msg)
+        print(f"Email de seguimiento adhesivo 2K enviado correctamente a {to_email}")
+        return True
+    except Exception as e:
+        print(f"ERROR enviando email de seguimiento adhesivo 2K a {to_email}: {type(e).__name__}: {e}")
+        return False

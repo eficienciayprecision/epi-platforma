@@ -63,6 +63,7 @@ _TECH_LABELS = {
     "PERISTALTICA": "Peristaltica",
     "TORNILLO_HELICOIDAL": "Tornillo Helicoidal",
     "ENGRANAJES": "Engranajes",
+    "PISTON_NEUMATICO": "Pistón Neumático",
 }
 
 

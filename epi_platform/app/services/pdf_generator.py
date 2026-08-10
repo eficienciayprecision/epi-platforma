@@ -14,6 +14,7 @@ from reportlab.pdfbase.ttfonts import TTFont
 
 from app.schemas.epi_schemas import ClientOffer, InternalReport, SingleItemOffer, SingleItemInternalReport
 from app.services.pump_curve import build_curve_drawing
+from app.services.installation_sketch import build_installation_sketch
 
 # Identidad visual (colores y tipografias reales de la web, agosto 2026)
 NAVY_DEEP = colors.HexColor("#071527")
@@ -28,6 +29,7 @@ GOLD = BRASS
 
 _ASSETS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "assets")
 _LOGO_PATH = os.path.join(_ASSETS_DIR, "logo_transparent.png")
+_FONDO_WEB_PATH = os.path.join(_ASSETS_DIR, "fondo_web.jpg")
 _MONO_REGULAR = os.path.join(_ASSETS_DIR, "fonts", "IBMPlexMono-Regular.ttf")
 _MONO_BOLD = os.path.join(_ASSETS_DIR, "fonts", "IBMPlexMono-Bold.ttf")
 
@@ -56,6 +58,40 @@ _header_address = ParagraphStyle(
     "header_address", parent=styles["Normal"], fontName=_MONO_FONT,
     textColor=INK_SOFT, alignment=TA_CENTER, fontSize=7.5,
 )
+_ai_disclaimer = ParagraphStyle(
+    "ai_disclaimer", parent=styles["Normal"], fontName="Times-Italic",
+    textColor=INK_SOFT, alignment=TA_CENTER, fontSize=8.5, borderColor=BRASS,
+    borderWidth=0.6, borderPadding=6, backColor=colors.HexColor("#f5f2e9"),
+)
+
+
+def _footer_canvas(canvas, doc):
+    """Pie de pagina de marca: franja con el fondo real de la web (rejilla
+    tipo plano tecnico) y el aviso de IA no vinculante, en cada pagina."""
+    canvas.saveState()
+    page_w, page_h = A4
+    footer_h = 18 * mm
+    if os.path.exists(_FONDO_WEB_PATH):
+        canvas.drawImage(
+            _FONDO_WEB_PATH, 0, 0, width=page_w, height=footer_h,
+            preserveAspectRatio=False, mask="auto",
+        )
+    else:
+        canvas.setFillColor(NAVY_DEEP)
+        canvas.rect(0, 0, page_w, footer_h, fill=1, stroke=0)
+    canvas.setFillColor(colors.white)
+    canvas.setFont(_MONO_FONT, 6.3)
+    canvas.drawCentredString(
+        page_w / 2, footer_h - 7 * mm,
+        "OFERTA GENERADA MEDIANTE INTELIGENCIA ARTIFICIAL (ASISTENTE EPI) — CARACTER ORIENTATIVO, NO VINCULANTE",
+    )
+    canvas.setFillColor(BRASS_BRIGHT)
+    canvas.setFont(_MONO_FONT, 6)
+    canvas.drawCentredString(
+        page_w / 2, footer_h - 12 * mm,
+        "EFICIENCIA Y PRECISIÓN INDUSTRIAL S.L. · BILBAO (BIZKAIA) · EFICIENCIAYPRECISIONINDUSTRIAL.COM",
+    )
+    canvas.restoreState()
 
 
 def _company_header(elements, subtitle: str):
@@ -84,7 +120,7 @@ def _company_header(elements, subtitle: str):
 
 
 def generate_client_offer_pdf(offer: ClientOffer, output_path: str) -> str:
-    doc = SimpleDocTemplate(output_path, pagesize=A4)
+    doc = SimpleDocTemplate(output_path, pagesize=A4, bottomMargin=30 * mm)
     elements = []
     _company_header(elements, "Solución Técnica y Oferta Comercial — Asistente de IA EPi")
 
@@ -96,6 +132,12 @@ def generate_client_offer_pdf(offer: ClientOffer, output_path: str) -> str:
         elements.append(Spacer(1, 6 * mm))
 
     elements.append(Paragraph(f"<b>Precio total final:</b> {offer.final_price_eur:,.2f} €", h2))
+    elements.append(Spacer(1, 4 * mm))
+    elements.append(Paragraph(
+        "Esta oferta ha sido generada mediante inteligencia artificial (asistente EPi) "
+        "a partir de los datos aportados. Tiene carácter orientativo y no es vinculante "
+        "hasta su confirmación expresa por parte de Eficiencia y Precisión Industrial S.L.",
+        _ai_disclaimer))
     elements.append(Spacer(1, 6 * mm))
 
     elements.append(Paragraph("Equipo de bombeo recomendado", h2))
@@ -106,9 +148,10 @@ def generate_client_offer_pdf(offer: ClientOffer, output_path: str) -> str:
     elements.append(Spacer(1, 6 * mm))
 
     elements.append(Paragraph("Materiales y piping incluidos", h2))
+    _cell_mat = ParagraphStyle("mat_cell", parent=styles["Normal"], fontName="Times-Roman", fontSize=8, leading=10)
     data = [["Elemento", "Especificación", "Cantidad"]]
     for m in offer.materials:
-        data.append([m.element, m.specification, m.quantity_display])
+        data.append([Paragraph(m.element, _cell_mat), Paragraph(m.specification, _cell_mat), m.quantity_display])
     table = Table(data, colWidths=[55 * mm, 80 * mm, 35 * mm])
     table.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, 0), NAVY),
@@ -118,6 +161,15 @@ def generate_client_offer_pdf(offer: ClientOffer, output_path: str) -> str:
     ]))
     elements.append(table)
     elements.append(Spacer(1, 6 * mm))
+
+    try:
+        sketch_labels = ["Aspiración / Depósito", f"{offer.pump.technology.value}"] + [
+            m.element for m in offer.materials[:3]
+        ] + ["Descarga"]
+        elements.append(build_installation_sketch(sketch_labels))
+        elements.append(Spacer(1, 6 * mm))
+    except Exception:
+        pass  # el croquis es un extra visual, nunca debe bloquear la oferta
 
     elements.append(Paragraph("Parámetros operativos", h2))
     elements.append(Paragraph(
@@ -150,7 +202,7 @@ def generate_client_offer_pdf(offer: ClientOffer, output_path: str) -> str:
     elements.append(Spacer(1, 4 * mm))
     elements.append(Paragraph("Propuesta válida durante 30 días naturales.", body))
 
-    doc.build(elements)
+    doc.build(elements, onFirstPage=_footer_canvas, onLaterPages=_footer_canvas)
     return output_path
 
 
@@ -260,7 +312,7 @@ def generate_internal_report_pdf(report: InternalReport, output_path: str) -> st
 # ---------------------------------------------------------------------------
 
 def generate_single_item_offer_pdf(offer: SingleItemOffer, output_path: str) -> str:
-    doc = SimpleDocTemplate(output_path, pagesize=A4)
+    doc = SimpleDocTemplate(output_path, pagesize=A4, bottomMargin=30 * mm)
     elements = []
     _company_header(elements, "Oferta de Elemento Individual — Asistente de IA EPi")
 
@@ -272,15 +324,23 @@ def generate_single_item_offer_pdf(offer: SingleItemOffer, output_path: str) -> 
         elements.append(Spacer(1, 6 * mm))
 
     elements.append(Paragraph(f"<b>Precio total final:</b> {offer.final_price_eur:,.2f} €", h2))
+    elements.append(Spacer(1, 4 * mm))
+    elements.append(Paragraph(
+        "Esta oferta ha sido generada mediante inteligencia artificial (asistente EPi) "
+        "a partir de los datos aportados. Tiene carácter orientativo y no es vinculante "
+        "hasta su confirmación expresa por parte de Eficiencia y Precisión Industrial S.L.",
+        _ai_disclaimer))
     elements.append(Spacer(1, 6 * mm))
 
-    data = [["Elemento", "Cantidad"], [offer.item_name, f"{offer.quantity:g} {offer.unit}"]]
+    _cell_single = ParagraphStyle("single_cell", parent=styles["Normal"], fontName="Times-Roman", fontSize=9, leading=11)
+    data = [["Elemento", "Cantidad"], [Paragraph(offer.item_name, _cell_single), f"{offer.quantity:g} {offer.unit}"]]
     table = Table(data, colWidths=[110 * mm, 60 * mm])
     table.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, 0), NAVY),
         ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
         ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
         ("FONTSIZE", (0, 0), (-1, -1), 9),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.HexColor("#f5f2e9")]),
     ]))
     elements.append(table)
     elements.append(Spacer(1, 4 * mm))
@@ -296,7 +356,7 @@ def generate_single_item_offer_pdf(offer: SingleItemOffer, output_path: str) -> 
         "la recepción de su pedido, es posible que este no se haya tramitado — "
         "por favor, contacte con nosotros en ese caso.", body))
 
-    doc.build(elements)
+    doc.build(elements, onFirstPage=_footer_canvas, onLaterPages=_footer_canvas)
     return output_path
 
 
@@ -348,7 +408,7 @@ def generate_single_item_internal_pdf(report: SingleItemInternalReport, output_p
 def generate_spare_part_offer_pdf(offer, output_path: str) -> str:
     """NUEVO — oferta de un unico repuesto (referencia + descripcion +
     fabricante + cantidad + precio). Reutiliza el estilo de las demas ofertas."""
-    doc = SimpleDocTemplate(output_path, pagesize=A4)
+    doc = SimpleDocTemplate(output_path, pagesize=A4, bottomMargin=30 * mm)
     elements = []
     _company_header(elements, "Oferta de Repuesto — Asistente de IA EPi")
 
@@ -360,11 +420,19 @@ def generate_spare_part_offer_pdf(offer, output_path: str) -> str:
         elements.append(Spacer(1, 6 * mm))
 
     elements.append(Paragraph(f"<b>Precio total final:</b> {offer.final_price_eur:,.2f} €", h2))
+    elements.append(Spacer(1, 4 * mm))
+    elements.append(Paragraph(
+        "Esta oferta ha sido generada mediante inteligencia artificial (asistente EPi) "
+        "a partir de los datos aportados. Tiene carácter orientativo y no es vinculante "
+        "hasta su confirmación expresa por parte de Eficiencia y Precisión Industrial S.L.",
+        _ai_disclaimer))
     elements.append(Spacer(1, 6 * mm))
 
+    _cell_sp = ParagraphStyle("sp_cell", parent=styles["Normal"], fontName="Times-Roman", fontSize=8, leading=10)
     data = [
         ["Referencia", "Descripción", "Fabricante", "Cantidad", "Precio unitario"],
-        [offer.referencia, offer.descripcion, offer.fabricante, f"{offer.quantity:g}",
+        [Paragraph(offer.referencia, _cell_sp), Paragraph(offer.descripcion, _cell_sp),
+         Paragraph(offer.fabricante, _cell_sp), f"{offer.quantity:g}",
          f"{offer.unit_price_eur:,.2f} €"],
     ]
     table = Table(data, colWidths=[28 * mm, 62 * mm, 35 * mm, 20 * mm, 25 * mm])
@@ -374,6 +442,7 @@ def generate_spare_part_offer_pdf(offer, output_path: str) -> str:
         ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
         ("FONTSIZE", (0, 0), (-1, -1), 8),
         ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.HexColor("#f5f2e9")]),
     ]))
     elements.append(table)
     elements.append(Spacer(1, 6 * mm))
@@ -388,5 +457,94 @@ def generate_spare_part_offer_pdf(offer, output_path: str) -> str:
         "la recepción de su pedido, es posible que este no se haya tramitado — "
         "por favor, contacte con nosotros en ese caso.", body))
 
-    doc.build(elements)
+    doc.build(elements, onFirstPage=_footer_canvas, onLaterPages=_footer_canvas)
+    return output_path
+
+
+def generate_adhesive_equipment_offer_pdf(offer, output_path: str) -> str:
+    """NUEVO — oferta de equipo de aplicacion de adhesivo 1K (pistola manual
+    o fotocelula/electrovalvula si es automatica, + elevador de bidon), con
+    referencia y precio de cada elemento."""
+    doc = SimpleDocTemplate(output_path, pagesize=A4, bottomMargin=30 * mm)
+    elements = []
+    _company_header(elements, "Oferta de Equipo de Aplicación de Adhesivo — Asistente de IA EPi")
+
+    if offer.contact and (offer.contact.company_name or offer.contact.contact_name):
+        dest = offer.contact.company_name or offer.contact.contact_name
+        elements.append(Paragraph(f"Para: {dest}", body))
+        if offer.contact.contact_name and offer.contact.company_name:
+            elements.append(Paragraph(f"At./ {offer.contact.contact_name}", body))
+        elements.append(Spacer(1, 6 * mm))
+
+    elements.append(Paragraph(f"<b>Precio total final:</b> {offer.final_price_eur:,.2f} €", h2))
+    elements.append(Paragraph(f"Perfil de inversión: {offer.profile}", body))
+    elements.append(Spacer(1, 4 * mm))
+    elements.append(Paragraph(
+        "Esta oferta ha sido generada mediante inteligencia artificial (asistente EPi) "
+        "a partir de los datos aportados. Tiene carácter orientativo y no es vinculante "
+        "hasta su confirmación expresa por parte de Eficiencia y Precisión Industrial S.L.",
+        _ai_disclaimer))
+    elements.append(Spacer(1, 6 * mm))
+
+    _cell = ParagraphStyle("adh_cell", parent=styles["Normal"], fontName="Times-Roman", fontSize=8.5, leading=10.5)
+    data = [["Elemento", "Referencia", "Fabricante", "Precio"]]
+    for item in offer.items:
+        data.append([
+            Paragraph(item.elemento, _cell),
+            Paragraph(item.referencia, _cell),
+            Paragraph(item.fabricante, _cell),
+            f"{item.precio_eur:,.2f} €",
+        ])
+    table = Table(data, colWidths=[58 * mm, 32 * mm, 55 * mm, 25 * mm])
+    table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), NAVY),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+        ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
+        ("FONTSIZE", (0, 0), (-1, -1), 8.5),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.HexColor("#f5f2e9")]),
+    ]))
+    elements.append(table)
+    elements.append(Spacer(1, 6 * mm))
+
+    try:
+        low_all = [it.elemento.lower() for it in offer.items]
+        sketch_labels = ["Bidón"]
+        if any("elevador" in l for l in low_all):
+            sketch_labels.append("Elevador de bidón")
+        if any("pistón" in l or "piston" in l or "clapeta" in l or "chop-check" in l for l in low_all):
+            sketch_labels.append("Bomba de pistón")
+        if any("manguera" in l for l in low_all):
+            sketch_labels.append("Manguera")
+        if offer.application_type == "automatica":
+            if any("fotocélula" in l for l in low_all):
+                sketch_labels.append("Fotocélula")
+            if any("electroválvula" in l for l in low_all):
+                sketch_labels.append("Electroválvula")
+            sketch_labels.append("Válvula automática")
+        else:
+            sketch_labels.append("Pistola manual")
+        elements.append(build_installation_sketch(sketch_labels))
+        elements.append(Spacer(1, 6 * mm))
+    except Exception:
+        pass  # el croquis es un extra visual, nunca debe bloquear la oferta
+
+    if offer.drum_liters:
+        elements.append(Paragraph(
+            f"Formato de bidón considerado: {offer.drum_liters:g} litros. El precio del "
+            "elevador de bidón es orientativo — en el momento del pedido necesitaremos el "
+            "diámetro exacto del bidón para confirmar el modelo y el precio definitivo.",
+            body))
+    else:
+        elements.append(Paragraph(
+            "El precio del elevador de bidón es orientativo hasta confirmar el formato y el "
+            "diámetro exacto del bidón en el momento del pedido.", body))
+    elements.append(Spacer(1, 8 * mm))
+    elements.append(Paragraph(
+        "<b>En caso de aceptación del presupuesto</b>, envíe el pedido oficial a "
+        "<b>pedidos@eficienciayprecisionindustrial.com</b>. Si no recibe confirmación de "
+        "la recepción de su pedido, es posible que este no se haya tramitado — "
+        "por favor, contacte con nosotros en ese caso.", body))
+
+    doc.build(elements, onFirstPage=_footer_canvas, onLaterPages=_footer_canvas)
     return output_path

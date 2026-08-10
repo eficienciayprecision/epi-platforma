@@ -39,6 +39,7 @@ from app.schemas.epi_schemas import (
     SelectedPump, MaterialsBreakdown, EPiFullSolution, ContactInfo,
     ObjectIdentificationResult, ItemQuoteRequest, SingleItemSolution,
     SparePartQuoteRequest, SparePartOffer,
+    AdhesiveFollowupRequest, AdhesiveOfferRequest, AdhesiveEquipmentOffer, AdhesiveEquipmentItem,
 )
 from app.engine.hydraulics import HydraulicEngine
 from app.engine.commercial import CommercialEngine
@@ -51,10 +52,10 @@ from app.agents.adhesive import AdhesiveAgent
 from app.services.pdf_generator import (
     generate_client_offer_pdf, generate_internal_report_pdf,
     generate_single_item_offer_pdf, generate_single_item_internal_pdf,
-    generate_spare_part_offer_pdf,
+    generate_spare_part_offer_pdf, generate_adhesive_equipment_offer_pdf,
 )
 from app.services.scraper import PriceScraper
-from app.services.email_service import send_offer_email, send_internal_report_email
+from app.services.email_service import send_offer_email, send_internal_report_email, send_adhesive_followup_email
 from app.services.vision_service import identify_object_from_image
 
 Base.metadata.create_all(bind=engine)
@@ -74,7 +75,7 @@ except Exception as _seed_error:  # nunca debe impedir que la app arranque
 
 app = FastAPI(
     title="EPi Engine API",
-    version="1.9.0",
+    version="1.9.7",
     description="Asistente IA para mecanica de fluidos — EPI S.L. Bilbao",
 )
 app.add_middleware(
@@ -104,6 +105,7 @@ def pump_row_to_selected(row: PumpModel) -> SelectedPump:
         "Peristaltica": PumpTechnology.PERISTALTICA,
         "Tornillo Helicoidal": PumpTechnology.TORNILLO_HELICOIDAL,
         "Engranajes": PumpTechnology.ENGRANAJES,
+        "Pistón Neumático": PumpTechnology.PISTON_NEUMATICO,
     }
     tech = tech_map.get(row.technology, PumpTechnology.CENTRIFUGA_MECANICO)
     try:
@@ -171,6 +173,16 @@ def select_from_db(
     if not ranked_allowed:
         ranked_allowed = [r.technology for r in reasoning]
 
+    # NUEVO — en el perfil BARATA, la neumatica de doble membrana es casi
+    # siempre la de menor coste de compra (aunque no la de mejor eficiencia,
+    # que es lo que usa PumpTechnologyAdvisor para puntuar). Si es fisicamente
+    # apta para el proceso, se prueba SIEMPRE la primera en el perfil barato,
+    # por delante de tecnologias con mejor puntuacion de eficiencia.
+    if profile == InvestmentProfile.BARATA and PumpTechnology.NEUMATICA_DOBLE_MEMBRANA in ranked_allowed:
+        ranked_allowed = [PumpTechnology.NEUMATICA_DOBLE_MEMBRANA] + [
+            t for t in ranked_allowed if t != PumpTechnology.NEUMATICA_DOBLE_MEMBRANA
+        ]
+
     bad_body, bad_elastomer = ChemicalCompatibilityAdvisor.bad_materials_for(hyd_req.fluid_name)
 
     def _best(rows: List[PumpModel]) -> PumpModel:
@@ -219,7 +231,7 @@ def compute_full_solution(req: "FullSolutionRequest", db: Session) -> EPiFullSol
         )
     # El caudalimetro hidraulico solo aplica a bombas con motor electrico:
     # las neumaticas (AODD) no llevan motor electrico, se alimentan de aire.
-    if pump.technology != PumpTechnology.NEUMATICA_DOBLE_MEMBRANA:
+    if pump.technology not in (PumpTechnology.NEUMATICA_DOBLE_MEMBRANA, PumpTechnology.PISTON_NEUMATICO):
         pump = pump.model_copy(update={"recommended_motor_kw": hyd.recommended_motor_kw})
 
     # NUEVO (V8): compatibilidad quimica del fluido con el material de la bomba elegida.
@@ -318,7 +330,7 @@ class PumpSelectRequest(BaseModel):
 
 @app.get("/health", tags=["System"])
 def health():
-    return {"status": "ok", "system": "EPi Platform", "version": "1.9.0"}
+    return {"status": "ok", "system": "EPi Platform", "version": "1.9.7"}
 
 
 @app.get("/", tags=["System"])
@@ -770,3 +782,165 @@ def oferta_repuesto(request: SparePartQuoteRequest, db: Session = Depends(get_db
         "client_pdf": str(client_path),
         "email_sent": email_sent,
     }
+
+
+# ---------------------------------------------------------------------------
+# Adhesivo — oferta de equipo (1K, con precio) y seguimiento (2K, sin precio)
+# ---------------------------------------------------------------------------
+
+# Referencias reales del catalogo de repuestos de EPi para equipo de adhesivo.
+# Bomba de piston por perfil de inversion — mientras no haya tarifa real de
+# Graco confirmada, el nivel CALIDAD_PRECIO tambien usa ARO (instruccion de
+# Jon: "vete siempre con lo que tengamos"), con un modelo mas economico que
+# el de PREMIUM para mantener la diferenciacion de precio entre niveles.
+_ADHESIVE_PISTON_PUMP_BY_PROFILE = {
+    "BARATA": ("Bomba de pistón para trasiego de adhesivo (Binks)", "02271001",
+               "BINKS REINHARDT-TECHNIK GMBH", 1870.50),
+    "CALIDAD_PRECIO": ("Bomba de pistón ARO 4-1/4\" 9:1 (2 bolas)", "AF0409C11FF22",
+                       "INGERSOLL RAND INDUSTRIAL IRELAND LTD.", 5702.00),
+    "PREMIUM": ("Bomba de pistón ARO 4-1/4\" 2:1 (4 bolas, AFX)", "AF0402M11KS48-1",
+               "INGERSOLL RAND INDUSTRIAL IRELAND LTD.", 12660.00),
+}
+# NUEVO — para adhesivos MUY VISCOSOS/PASTOSOS hace falta bomba de clapetas
+# (chop-check), no la de bolas normal: tiene un piston "primer" que empuja
+# el material y valvulas planas mecanicas en vez de bolas, para materiales
+# que no fluyen solos y se pegan a si mismos. Solo tenemos tarifa real ARO
+# en el rango de relacion que pidio Jon (23:1 a 46:1) — mismo criterio de
+# "vete con lo que tengamos": las tres opciones usan ARO, diferenciadas por
+# relacion de compresion en vez de precio (que es igual en ambas).
+_ADHESIVE_CHOPCHECK_PUMP_BY_PROFILE = {
+    "BARATA": ("Bomba de clapetas (chop-check) ARO 6\" 23:1", "AF0623S11KK47-1",
+               "INGERSOLL RAND INDUSTRIAL IRELAND LTD.", 9067.00),
+    "CALIDAD_PRECIO": ("Bomba de clapetas (chop-check) ARO 6\" 23:1", "AF0623S11KK47-1",
+                       "INGERSOLL RAND INDUSTRIAL IRELAND LTD.", 9067.00),
+    "PREMIUM": ("Bomba de clapetas (chop-check) ARO 6\" 46:1", "AF0646S11GF47-1",
+               "INGERSOLL RAND INDUSTRIAL IRELAND LTD.", 9067.00),
+}
+_ADHESIVE_MANUAL_GUN = ("Pistola manual de extrusión Walther Pilot", "V1025000000",
+                        "WALTHER SPRITZ-UND LACKIERSYSTEME GMBH", 817.50)
+_ADHESIVE_PHOTOCELL = ("Fotocélula", "K96311100", "ZATOR, S.R.L.", 175.00)
+_ADHESIVE_SOLENOID = ("Electroválvula", "ELT000321", "ZATOR, S.R.L.", 135.80)
+_ADHESIVE_HOSE_PRICE_PER_M = 152.00  # Manguera PTFE alta presion (ref. 00139000, 456€/3m)
+_ADHESIVE_HOSE_REF = ("00139000", "BINKS REINHARDT-TECHNIK GMBH")
+
+
+def _adhesive_elevator_price(drum_liters: float | None) -> float:
+    """Precio orientativo del elevador de bidon segun tamaño (dato dado por
+    Jon: 9.000-12.000 EUR segun el tamaño). Interpola entre 20 y 200 litros;
+    si no se conoce el tamaño, usa un valor intermedio marcado como estimado."""
+    if drum_liters is None:
+        return 10500.0
+    lo, hi = 20.0, 200.0
+    price_lo, price_hi = 9000.0, 12000.0
+    t = max(0.0, min(1.0, (drum_liters - lo) / (hi - lo)))
+    return round(price_lo + t * (price_hi - price_lo), 2)
+
+
+@app.post("/api/v1/adhesive/oferta", tags=["Cliente — Instalacion de adhesivo"])
+def adhesive_oferta(request: AdhesiveOfferRequest, db: Session = Depends(get_db)):
+    """SOLO para 1K: genera la oferta de equipo de aplicacion (pistola o
+    fotocelula/electrovalvula segun aplicacion, + elevador de bidon) con
+    referencia y precio de cada elemento."""
+    items = []
+    # Orden fisico real del proceso: elevador (baja al bidon) -> bomba de
+    # piston (trasiega) -> manguera -> pistola/automatismo.
+    elevator_price = _adhesive_elevator_price(request.drum_liters)
+    drum_txt = f"{request.drum_liters:g} litros" if request.drum_liters else "a confirmar"
+    items.append(AdhesiveEquipmentItem(
+        elemento=f"Elevador de bidón ({drum_txt}) — precio orientativo, a confirmar con diámetro exacto",
+        referencia="A CONFIRMAR", fabricante="A confirmar según modelo", precio_eur=elevator_price,
+    ))
+
+    profile_key = request.profile if request.profile in _ADHESIVE_PISTON_PUMP_BY_PROFILE else "CALIDAD_PRECIO"
+    pump_dict = _ADHESIVE_CHOPCHECK_PUMP_BY_PROFILE if request.is_viscous else _ADHESIVE_PISTON_PUMP_BY_PROFILE
+    nombre, ref, fab, precio = pump_dict[profile_key]
+    items.append(AdhesiveEquipmentItem(elemento=nombre, referencia=ref, fabricante=fab, precio_eur=precio))
+
+    if request.hose_meters:
+        hose_ref, hose_fab = _ADHESIVE_HOSE_REF
+        hose_price = round(_ADHESIVE_HOSE_PRICE_PER_M * request.hose_meters, 2)
+        items.append(AdhesiveEquipmentItem(
+            elemento=f"Manguera PTFE alta presión ({request.hose_meters:g} m)",
+            referencia=hose_ref, fabricante=hose_fab, precio_eur=hose_price,
+        ))
+
+    if request.application_type == "automatica":
+        if request.needs_photocell:
+            nombre, ref, fab, precio = _ADHESIVE_PHOTOCELL
+            items.append(AdhesiveEquipmentItem(elemento=nombre, referencia=ref, fabricante=fab, precio_eur=precio))
+        if request.needs_solenoid:
+            nombre, ref, fab, precio = _ADHESIVE_SOLENOID
+            items.append(AdhesiveEquipmentItem(elemento=nombre, referencia=ref, fabricante=fab, precio_eur=precio))
+    else:
+        nombre, ref, fab, precio = _ADHESIVE_MANUAL_GUN
+        items.append(AdhesiveEquipmentItem(elemento=nombre, referencia=ref, fabricante=fab, precio_eur=precio))
+
+    final_price = round(sum(i.precio_eur for i in items), 2)
+    offer = AdhesiveEquipmentOffer(
+        application_type=request.application_type,
+        profile=profile_key,
+        drum_liters=request.drum_liters,
+        hose_meters=request.hose_meters,
+        items=items,
+        final_price_eur=final_price,
+        contact=request.contact,
+    )
+
+    client_path = OUTPUT_DIR / f"Oferta_Adhesivo_{uuid.uuid4().hex[:6]}.pdf"
+    generate_adhesive_equipment_offer_pdf(offer, str(client_path))
+
+    email_sent = False
+    if request.contact and request.contact.email:
+        email_sent = send_offer_email(
+            to_email=request.contact.email,
+            contact_name=request.contact.contact_name,
+            company_name=request.contact.company_name,
+            pdf_path=str(client_path),
+            final_price_eur=final_price,
+        )
+
+    lead = LeadModel(
+        contact_name=request.contact.contact_name if request.contact else None,
+        company_name=request.contact.company_name if request.contact else None,
+        phone=request.contact.phone if request.contact else None,
+        email=request.contact.email if request.contact else None,
+        client_id=f"ADHESIVO-1K-{uuid.uuid4().hex[:6]}",
+        final_price_eur=final_price,
+        profile_selected="ADHESIVO_1K",
+        email_sent=email_sent,
+        solution_snapshot=offer.model_dump(),
+    )
+    db.add(lead)
+    db.commit()
+
+    return {"offer": offer.model_dump(), "client_pdf": str(client_path), "email_sent": email_sent}
+
+
+@app.post("/api/v1/adhesive/seguimiento", tags=["Cliente — Instalacion de adhesivo"])
+def adhesive_seguimiento(request: AdhesiveFollowupRequest, db: Session = Depends(get_db)):
+    """SOLO para 2K: no se genera oferta con precio automatica — se guardan
+    los datos y se envia un correo al cliente avisando de que un ingeniero
+    le contactara."""
+    email_sent = False
+    if request.contact and request.contact.email:
+        email_sent = send_adhesive_followup_email(
+            to_email=request.contact.email,
+            contact_name=request.contact.contact_name,
+            company_name=request.contact.company_name,
+            raw_answers=request.raw_answers,
+        )
+
+    lead = LeadModel(
+        contact_name=request.contact.contact_name if request.contact else None,
+        company_name=request.contact.company_name if request.contact else None,
+        phone=request.contact.phone if request.contact else None,
+        email=request.contact.email if request.contact else None,
+        client_id=f"ADHESIVO-2K-{uuid.uuid4().hex[:6]}",
+        profile_selected="ADHESIVO_2K",
+        email_sent=email_sent,
+        solution_snapshot={"raw_answers": request.raw_answers},
+    )
+    db.add(lead)
+    db.commit()
+
+    return {"email_sent": email_sent}

@@ -1,5 +1,211 @@
 # EPi Platform — Eficiencia y Precisión Industrial S.L.
 
+## FIX 1.9.7 (agosto 2026): bomba de clapetas (chop-check) para adhesivos viscosos
+
+Jon pidió que para adhesivos MUY VISCOSOS/PASTOSOS se use una bomba de
+clapetas (chop-check en inglés — término confirmado por búsqueda: es
+justo el nombre técnico correcto), con relación de compresión entre 23:1
+y 46:1, en vez de la bomba de pistón de bolas normal.
+
+La pregunta de viscosidad ya existía en la entrevista 1K ("fluido, medio,
+o muy viscoso/pastoso") — ahora `app/agents/adhesive.py` detecta la
+respuesta y marca `is_viscous`, que el backend usa para elegir el
+diccionario de bombas correcto.
+
+**Referencias reales encontradas** (únicas dos en nuestra base dentro del
+rango 23:1-46:1 que pidió Jon, ambas ARO):
+- `AF0623S11KK47-1` — chop-check 6" 23:1 — 9.067,00 €
+- `AF0646S11GF47-1` — chop-check 6" 46:1 — 9.067,00 €
+
+Mismo criterio que con Graco: no hay tarifa real de Wagner/Binks en ese
+rango de relación, así que los tres perfiles usan ARO (instrucción de Jon:
+"vete siempre con lo que tengamos"), diferenciados por relación de
+compresión en vez de precio — barata y calidad-precio con la de 23:1,
+premium con la de 46:1 (mayor relación = más capacidad para el material
+más pastoso, coherente con el posicionamiento premium aunque el precio
+sea idéntico en nuestros datos).
+
+## FIX 1.9.6 (agosto 2026): tres perfiles de bomba de pistón en la oferta de adhesivo
+
+Jon pidió que la oferta de equipo de adhesivo (1K) tuviera tres niveles de
+inversión (como el resto de EPi), cada uno con una marca de bomba de
+pistón distinta: barata (Wagner/Binks), calidad-precio (Graco), premium
+(ARO Ingersoll Rand). Al revisarlo con Jon salieron dos ajustes:
+
+- **No tenemos tarifa real de Binks** (el precio que había era un dato
+  suelto de la base de repuestos, no una tarifa confirmada) — se mantiene
+  igualmente por ser el único dato real disponible para el nivel barato.
+- **Graco no tiene precio de bomba completa en nuestros datos** — solo
+  encontramos kits de reparación y una pistola suelta, no una bomba
+  completa. Búsqueda web tampoco dio un precio fiable. Instrucción de Jon:
+  "mientras no tengamos más en la base de datos, vete siempre con lo que
+  tengamos" — así que el nivel calidad-precio usa también ARO (un modelo
+  más económico que el de premium), no Graco, hasta que haya tarifa real.
+
+**Los tres niveles ahora mismo** (todos con precio real verificado en
+nuestra base de repuestos, ninguno inventado):
+- BARATA: Binks `02271001` — 1.870,50 €
+- CALIDAD_PRECIO: ARO Ingersoll Rand `AF0409C11FF22` (4-1/4" 9:1, 2 bolas) — 5.702,00 €
+- PREMIUM: ARO Ingersoll Rand `AF0402M11KS48-1` (4-1/4" 2:1, 4 bolas, AFX) — 12.660,00 €
+
+El resto de elementos (pistola, elevador, manguera, fotocélula/electroválvula)
+no varían por perfil — solo la bomba, que es donde Jon pidió la
+diferenciación. Añadido selector de perfil en el frontend, visible solo
+para adhesivo 1K (no aplica a 2K, que no genera oferta con precio).
+
+## FIX 1.9.5 (agosto 2026): croquis de instalación + bomba de pistón y manguera en adhesivo
+
+Jon pidió que las ofertas incluyan "una foto real y un croquis simulado de
+la instalación". Aviso importante, tratado con cuidado: **no se han
+añadido fotos de fabricantes sacadas de internet** — usarlas en un
+documento comercial de la empresa sin licencia es un riesgo real de
+derechos de autor (son imágenes de terceros, no de EPi). En su lugar se
+generó un **croquis esquemático propio** (`app/services/installation_sketch.py`),
+en el mismo estilo de plano técnico que ya usa la web, con cada elemento
+de la oferta en una caja conectada por flechas en el orden real del
+proceso. Añadido a la Oferta Cliente principal (aspiración → bomba →
+primeros elementos de la lista de materiales → descarga) y a la Oferta de
+Equipo de Adhesivo (bidón → elevador → bomba de pistón → manguera →
+pistola/automatismo).
+
+**Adhesivo 1K — dos cosas más que pidió Jon:**
+- Nueva pregunta: cuántos metros de manguera hacen falta.
+- La oferta ahora incluye también la bomba de pistón (real: `02271001`,
+  Binks Reinhardt-Technik, 1.870,50 €) y la manguera PTFE de alta presión
+  (real: `00139000`, mismo fabricante, calculada a 152 €/m según los
+  metros indicados) — antes solo se ofertaban pistola/automatismo +
+  elevador.
+
+**Fallos reales corregidos al probarlo:**
+- El orden de los elementos (tabla y croquis) tenía el elevador DESPUÉS de
+  la bomba de pistón — físicamente al revés (el elevador es lo que baja al
+  bidón primero). Corregido en `app/main.py` y en la construcción del
+  croquis.
+- Al insertar el croquis en la Oferta Cliente, el contenido se desplazó a
+  una segunda página — comportamiento normal de paginación, no un fallo
+  (verificado generando el PDF de verdad y revisando ambas páginas).
+
+## FIX 1.9.4 (agosto 2026): equipo de adhesivo con precio real (1K) / seguimiento (2K)
+
+Jon pidió que, para adhesivo de 1 componente, la oferta incluya con precio y
+referencia real: la pistola manual de extrusión Walther Pilot (si es
+aplicación manual) o la fotocélula/electroválvula (si es automática), más
+el elevador de bidón. Para 2 componentes, en cambio, no se genera oferta
+con precio — se recogen los datos y se envía un correo al cliente avisando
+de que un ingeniero le contactará.
+
+**Referencias reales usadas** (localizadas en nuestra propia base de
+repuestos de 14.629 líneas, no inventadas):
+- Pistola manual de extrusión: `V1025000000` (Walther Spritz-und
+  Lackiersysteme GmbH), 817,50 €.
+- Fotocélula: `K96311100` (Zator, S.R.L.), 175,00 €.
+- Electroválvula: `ELT000321` (Zator, S.R.L.), 135,80 €. El "MZ200" que
+  mencionó Jon no está literalmente en nuestros datos con ese código exacto
+  — sí existe toda la familia Zator "MZ..." de válvulas de extrusión
+  (MZK408, MZB200, MZB300), así que se usó la electroválvula real más
+  cercana en vez de inventar una referencia — a confirmar con Jon si quiere
+  el código exacto.
+- Elevador de bidón: no está en el catálogo de repuestos (es equipo, no
+  recambio). Precio interpolado entre 9.000 € (20 L) y 12.000 € (200 L),
+  siempre marcado como orientativo pendiente del diámetro exacto del bidón.
+
+**Cambios técnicos:**
+- `app/agents/adhesive.py`: añadida la pregunta de viscosidad de cada
+  componente para 2K; al terminar, devuelve datos estructurados (no solo
+  texto) para poder generar la oferta o el correo sin otra ronda de
+  preguntas.
+- Dos endpoints nuevos: `/api/v1/adhesive/oferta` (1K, con PDF y precio) y
+  `/api/v1/adhesive/seguimiento` (2K, solo correo de confirmación).
+- Frontend: nuevo botón "Generar oferta / Enviar seguimiento" al terminar
+  la conversación de adhesivo.
+
+**Fallo real encontrado y corregido al probar el PDF**: el texto largo en
+las celdas de las tablas (fabricante, descripción...) se solapaba
+visualmente en vez de ajustarse — afectaba a las 4 tablas de oferta del
+PDF (cliente, elemento suelto, repuesto, y esta nueva de adhesivo).
+Corregido usando párrafos con ajuste de línea en vez de texto plano en
+todas ellas.
+
+## FIX 1.9.3 (agosto 2026): dosificación de adhesivo — bidón, aplicación, repuestos
+
+Jon pidió que el módulo de adhesivo (`app/agents/adhesive.py`) pregunte,
+además de lo específico de 1K/2K, tres cosas más — comunes a ambas ramas:
+
+1. **Formato de suministro** del material (típicamente bidón de 20 o 200
+   litros), avisando de que en el pedido hará falta el **diámetro exacto**
+   del bidón para dimensionar bien el conjunto.
+2. **Aplicación manual o automática** — para saber si hace falta pistola
+   manual o válvula/aplicador automático.
+3. **Si es automática**: si necesita fotocélula y electroválvula —
+   avisando de que estos elementos se pueden coger del catálogo de
+   repuestos de EPi (ejemplo dado por Jon: la electroválvula MZ200 de
+   Zator).
+
+También se añadió el nuevo tipo de tecnología `PISTON_NEUMATICO` (bomba de
+pistón de aire, ej. ARO 4-ball/AFX) al motor de razonamiento — mecánicamente
+distinta de la neumática de doble membrana aunque también funcione con
+aire comprimido, con buen comportamiento en fluidos viscosos (relevante
+para adhesivos). **Nota**: se comprobó que las 297 referencias ARO de
+pistón detectadas anoche NO estaban realmente en el catálogo operativo de
+EPi (les faltaba el caudal, igual que a otras ~550 referencias ARO), así
+que no había ninguna oferta real mal clasificada que corregir — el tipo
+nuevo queda preparado en el sistema para cuando se localicen sus caudales.
+
+**Fallo real encontrado y corregido al probarlo** (con simulación completa
+del flujo, no solo revisión de código): el frontend duplica el último
+mensaje del usuario en `history` antes de llamar al backend — sin tenerlo
+en cuenta, las preguntas se desajustaban una posición. Además, la primera
+comprobación de "aplicación automática" fallaba por la tilde de
+"automática" (comparaba con la palabra sin tildes). Ambos corregidos y
+verificados con una simulación completa de conversación en los tres casos
+(1K+automática, 1K+manual, 2K+automática).
+
+## Sesión nocturna (agosto 2026): más material ARO + perfil barato = neumática
+
+### 1. Perfil "barata" prioriza neumática
+
+Antes, dentro de las tecnologías físicamente aptas para el proceso, EPi las
+probaba en orden de EFICIENCIA (lo que usa `PumpTechnologyAdvisor` para
+puntuar) — así que en el perfil BARATA podía acabar recomendando una
+centrífuga o de engranajes antes que una neumática, aunque la neumática sea
+casi siempre la de menor coste de compra. Corregido en `select_from_db`
+(`app/main.py`): en el perfil BARATA, si la neumática de doble membrana es
+físicamente apta, se prueba SIEMPRE la primera — por delante de tecnologías
+con mejor puntuación de eficiencia. Nunca se fuerza si no es apta (sólidos,
+abrasivos, etc. pueden seguir descartándola).
+
+### 2. Más material ARO decodificado (para compatibilidad química)
+
+Investigación en fichas oficiales ARO/Ingersoll Rand y distribuidores
+(PumpCatalog, TFPumps, Applied, KAD, manual oficial ARO 66610X-X-C):
+
+- Ampliado el decodificador de la serie nueva PD/PE (antes solo cubría
+  "PD", ahora también "PE" con su 4º segmento opcional).
+- Añadido el decodificador oficial del código legado "666xxx" (tabla de
+  asiento/bola/diafragma del manual ARO, y letras de cuerpo confirmadas
+  como AF/AJ/AP/A3/B3=Polipropileno, A4=PVDF).
+- Resultado: material de cuerpo 458→589, elastómero 359→635 (sobre 2.059
+  referencias totales). En el catálogo operativo (1.480 bombas): cuerpo
+  411→537, elastómero 357→615.
+
+**Sigue habiendo ~1.470 referencias sin material de cuerpo** (sobre todo
+ARO de series antiguas sin manual localizado, y toda la parte de
+repuestos). No se ha inventado ningún dato — donde no hay confirmación, se
+queda vacío (amarillo en el Excel) en vez de asumir compatibilidad.
+
+### 3. AVISO IMPORTANTE — revisar con Matías antes de tocar
+
+Las 297 referencias ARO "AF04xx..." (ej. `AF0402M11FF48`) **no son bombas
+neumáticas de doble membrana** — son bombas de **pistón** (ARO 4-ball
+Piston Pump / tecnología AFX), mecánicamente distintas. Actualmente están
+clasificadas en el catálogo operativo como "Neumática de Doble Membrana"
+(mismo criterio que el resto de ARO), lo cual es **incorrecto**. No se ha
+corregido esta noche porque cambiar la tecnología de 297 filas sin más
+verificación es arriesgado sin que alguien lo revise antes. Recomendado:
+confirmar y, si procede, crear una categoría de tecnología nueva ("Pistón
+neumático" o similar) antes de seguir ofertándolas como si fueran AODD —
+tienen un comportamiento de caudal/presión diferente.
+
 ## FIX 1.8.5 (agosto 2026): quitadas las bombas sin motor (eje libre) del catálogo
 
 Jon detectó que EPi estaba ofertando una bomba "SIN MOTOR" — un modelo a
