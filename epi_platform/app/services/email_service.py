@@ -42,6 +42,11 @@ def send_offer_email(
     host = os.getenv("EPI_SMTP_HOST")
     if not host:
         # Sin configuracion SMTP: no se envia, pero no se rompe el flujo.
+        # FIX — antes esto era silencioso (sin print): si EPI_SMTP_HOST no
+        # estaba bien puesta en Render, "PDF generado sin email" pasaba sin
+        # dejar ningun rastro en los logs, indistinguible de un fallo real
+        # de envio. Ahora queda constancia igual que en el resto de errores.
+        print("AVISO: EPI_SMTP_HOST no esta configurada — no se envia el email de oferta (solo se genera el PDF).")
         return False
 
     port = int(os.getenv("EPI_SMTP_PORT", "587"))
@@ -109,6 +114,7 @@ def send_internal_report_email(
     no — esto es para seguimiento interno, no para el cliente."""
     host = os.getenv("EPI_SMTP_HOST")
     if not host:
+        print("AVISO: EPI_SMTP_HOST no esta configurada — no se envia el informe interno.")
         return False
 
     port = int(os.getenv("EPI_SMTP_PORT", "587"))
@@ -166,6 +172,7 @@ def send_adhesive_followup_email(
     de EPI le contactara, con los datos recogidos como referencia."""
     host = os.getenv("EPI_SMTP_HOST")
     if not host:
+        print("AVISO: EPI_SMTP_HOST no esta configurada — no se envia el correo de seguimiento 2K.")
         return False
 
     port = int(os.getenv("EPI_SMTP_PORT", "587"))

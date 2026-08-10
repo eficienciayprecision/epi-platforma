@@ -1,5 +1,28 @@
 # EPi Platform — Eficiencia y Precisión Industrial S.L.
 
+## FIX 1.9.9 (agosto 2026): punto ciego en los logs del email (email sigue sin enviarse)
+
+Jon confirmó: puso su email en "Tus datos" y aun así el resultado fue
+"PDF generado" sin email. El código de envío en sí (`email_service.py`) se
+ha revisado varias veces esta semana y es correcto — pero se encontró un
+punto ciego real: si `EPI_SMTP_HOST` no está bien configurada en Render,
+las tres funciones de email (`send_offer_email`,
+`send_internal_report_email`, `send_adhesive_followup_email`) devolvían
+"no enviado" **sin dejar ningún rastro en los logs** — indistinguible de
+un fallo real de conexión/autenticación SMTP (que sí deja print). Añadido
+un aviso explícito para este caso en las tres funciones.
+
+**Esto no es la solución al problema del email en sí** — es la
+herramienta para POR FIN diagnosticarlo bien. Con esta versión desplegada,
+la próxima vez que se genere una oferta con email y no llegue, los logs de
+Render dirán una de estas tres cosas, y hay que mirar cuál:
+1. `Email de oferta enviado correctamente a ...` → sí se envió (el
+   problema estaría en otro sitio, p.ej. carpeta de spam).
+2. `ERROR enviando email de oferta a ...: <detalle>` → fallo real de
+   conexión/autenticación con Arsys — el detalle dice exactamente por qué.
+3. `AVISO: EPI_SMTP_HOST no esta configurada` → la variable de entorno en
+   Render está mal puesta o no se está leyendo.
+
 ## FIX URGENTE 1.9.8 (agosto 2026): la entrevista se quedaba en bucle infinito
 
 Jon reportó (con captura de pantalla) que EPi se quedaba repitiendo
