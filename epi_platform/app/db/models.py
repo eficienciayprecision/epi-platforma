@@ -32,6 +32,10 @@ class PumpModel(Base):
     wetted_elastomer_material = Column(String, nullable=True)
     # NUEVO (V9): enlace a la curva oficial del fabricante, cuando se localice.
     curve_reference_url = Column(String, nullable=True)
+    # NUEVO — eficiencia real calculada (potencia hidraulica en el punto de
+    # mejor eficiencia estimado / potencia de eje del motor), en % — NULL si
+    # no es una tecnologia de motor electrico o si faltan datos para calcularla.
+    real_efficiency_pct = Column(Float, nullable=True)
 
 
 class SparePartModel(Base):

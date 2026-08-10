@@ -129,6 +129,9 @@ class SelectedPump(BaseModel):
     # De momento vacio para casi todo el catalogo -> se dibuja una curva
     # orientativa (aproximada, no exacta) a partir de caudal/presion maximos.
     curve_reference_url: Optional[str] = None
+    # NUEVO — eficiencia real calculada (no la tipica por tecnologia), en %.
+    # Solo para tecnologias de motor electrico con datos suficientes.
+    real_efficiency_pct: Optional[float] = None
 
 
 class ChemicalCompatibilityResult(BaseModel):

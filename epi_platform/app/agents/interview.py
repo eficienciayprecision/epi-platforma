@@ -156,16 +156,43 @@ class InterviewAgent:
                 if m:
                     extracted["diameter_mm"] = float(m.group(1))
 
-        if "sosa" in up:
-            extracted.update(fluid_name="Sosa Caustica 30%", density_kg_m3=1330.0, viscosity_cp=4.0)
-        elif "acido" in up:
-            extracted.update(fluid_name="Acido diluido", density_kg_m3=1100.0, viscosity_cp=2.0)
-        elif "aceite" in up:
-            extracted.update(fluid_name="Aceite", density_kg_m3=900.0, viscosity_cp=100.0)
-        elif "miel" in up:
-            extracted.update(fluid_name="Miel", density_kg_m3=1400.0, viscosity_cp=2000.0)
-        elif "agua" in up:
-            extracted.update(fluid_name="Agua", density_kg_m3=1000.0, viscosity_cp=1.0)
+        # NUEVO — ampliado el diccionario de fluidos reconocidos (densidad y
+        # viscosidad aproximadas, valores tipicos de referencia) y marcado
+        # explicitamente cuando el fluido mencionado NO se reconoce, para no
+        # asumir agua en silencio sin que quede constancia de la suposicion.
+        fluid_db = [
+            (("sosa",), "Sosa Cáustica 30%", 1330.0, 4.0),
+            (("hipoclorito", "lejia", "lejía"), "Hipoclorito sódico", 1150.0, 2.0),
+            (("acido sulfurico", "ácido sulfúrico"), "Ácido sulfúrico diluido", 1300.0, 3.0),
+            (("acido clorhidrico", "ácido clorhídrico", "hcl"), "Ácido clorhídrico diluido", 1150.0, 2.0),
+            (("acido", "ácido"), "Ácido diluido", 1100.0, 2.0),
+            (("etanol", "alcohol"), "Etanol", 789.0, 1.2),
+            (("glicerina", "glicerol"), "Glicerina", 1260.0, 1400.0),
+            (("aceite hidraulico", "aceite hidráulico"), "Aceite hidráulico", 870.0, 46.0),
+            (("aceite",), "Aceite", 900.0, 100.0),
+            (("gasoil", "diesel", "gasóleo"), "Gasóleo", 840.0, 4.0),
+            (("leche",), "Leche", 1030.0, 2.0),
+            (("mosto", "vino"), "Mosto/Vino", 1010.0, 1.5),
+            (("melaza", "miel"), "Melaza/Miel", 1400.0, 2000.0),
+            (("salmuera",), "Salmuera", 1200.0, 1.5),
+            (("agua de mar",), "Agua de mar", 1025.0, 1.1),
+            (("agua",), "Agua", 1000.0, 1.0),
+        ]
+        matched = False
+        for keywords, name, density, viscosity in fluid_db:
+            if any(kw in up for kw in keywords):
+                extracted.update(fluid_name=name, density_kg_m3=density, viscosity_cp=viscosity)
+                matched = True
+                break
+        if not matched:
+            # se guarda el nombre tal cual lo escribio el cliente, pero SIN
+            # asumir una densidad — main.py avisa de esto en la oferta en
+            # vez de calcular en silencio como si fuera agua
+            m_fluid = re.search(r'(?:fluido|producto|liquido)\s*(?:es|:)?\s*([a-záéíóúñ0-9%\s]{3,40})', up)
+            if m_fluid:
+                candidate = m_fluid.group(1).strip()
+                if candidate and candidate not in ("no", "no lo se", "no lo sé"):
+                    extracted.update(fluid_name=candidate.title(), fluid_density_unknown=True)
 
         return extracted
 
@@ -237,6 +264,7 @@ class InterviewAgent:
         # Emparejar cada pregunta de campo ya formulada con la respuesta que
         # le siguio inmediatamente, y usarla tal cual si la extraccion por
         # palabra clave no la capto.
+        diameter_auto_selected = False
         last_q = None
         for h in history:
             role = h.get("role")
@@ -250,6 +278,28 @@ class InterviewAgent:
                         txt = answer.strip()
                         if txt and not re.fullmatch(r"[\d.,\s]+", txt):
                             collected["fluid_name"] = txt
+                    elif field == "diameter_mm" and re.search(
+                        r'\bno\s+(lo\s+)?s[eé]\b|\bno\s+est[aá]\s+(definid|instalad)|\bnueva\b|\ba\s+definir\b|\bno\s+lo\s+tengo\b',
+                        answer.lower(),
+                    ):
+                        # NUEVO — antes esto se quedaba bloqueado para
+                        # siempre si el cliente no sabia el diametro, pese a
+                        # que la pregunta ya prometia proponer uno. Ahora se
+                        # calcula de verdad el diametro economico optimo
+                        # (mejor relacion tuberia+energia, no solo el mas
+                        # barato de comprar) con los datos ya recogidos.
+                        if all(k in collected for k in ("flow_m3h", "static_head_m", "length_m")):
+                            from app.engine.hydraulics import HydraulicEngine
+                            rec = HydraulicEngine.recommend_diameter(
+                                flow_m3h=collected["flow_m3h"],
+                                length_m=collected["length_m"],
+                                static_head_m=collected["static_head_m"],
+                                k_accessories=2.5,
+                                density_kg_m3=1000.0,  # se corrige mas adelante segun el fluido
+                                viscosity_cp=1.0,
+                            )
+                            collected["diameter_mm"] = rec["recommended"]["diameter_mm"]
+                            diameter_auto_selected = True
                     else:
                         m = re.search(r"(\d+\.?\d*)", answer.replace(",", "."))
                         if m:
@@ -296,10 +346,28 @@ class InterviewAgent:
             "density_kg_m3": collected.get("density_kg_m3", 1000.0),
             "viscosity_cp": collected.get("viscosity_cp", 1.0),
             "fluid_name": collected.get("fluid_name", "Agua"),
+            "diameter_auto_selected": diameter_auto_selected,
+            "fluid_density_unknown": collected.get("fluid_density_unknown", False),
             **process_flags,
         }
+        notes = []
+        if diameter_auto_selected:
+            notes.append(
+                "El diámetro de tubería no estaba definido: se ha calculado el DN de mejor "
+                "relación calidad-precio (equilibrio entre coste de tubería y coste "
+                "energético), no simplemente el más barato de comprar."
+            )
+        if data["fluid_density_unknown"]:
+            notes.append(
+                f"No se ha reconocido con confianza la densidad de \"{data['fluid_name']}\" — "
+                "se recomienda confirmarla antes de dar la oferta por definitiva, ya que afecta "
+                "a la potencia y al caudal real de bombas centrífugas."
+            )
+        message = "Datos completos (modo sin LLM, leidos por palabras clave de sus mensajes). Revise antes de confirmar el calculo."
+        if notes:
+            message += " " + " ".join(notes)
         return {
             "status": "complete",
             "data": data,
-            "message": "Datos completos (modo sin LLM, leidos por palabras clave de sus mensajes). Revise antes de confirmar el calculo.",
+            "message": message,
         }

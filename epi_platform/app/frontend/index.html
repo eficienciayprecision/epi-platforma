@@ -97,6 +97,13 @@
     button.gold { background: var(--brass); color: var(--navy-deep); }
     button.gold:hover { background: var(--brass-bright); }
     button.outline { background: white; color: var(--navy); border: 1px solid var(--navy); }
+    a.btn-download {
+      background: var(--navy); color: white; border: none; border-radius: 2px;
+      padding: 11px 18px; cursor: pointer; font-size: 0.78rem; font-weight: 600;
+      font-family: 'IBM Plex Mono', monospace; letter-spacing: 0.05em; text-transform: uppercase;
+      display: inline-block; text-decoration: none; margin-top: 6px;
+    }
+    a.btn-download:hover { opacity: 0.9; }
     .contact-box label { display: block; font-size: 0.8rem; color: var(--gray); margin-top: 8px; }
     .contact-box input {
       width: 100%; padding: 8px; border: 1px solid var(--border);
@@ -577,7 +584,7 @@
           } else {
             resultBox.innerHTML = `<p><b>Precio total: ${data.offer.final_price_eur.toFixed(2)} €</b></p>`
               + `<p style="font-size:0.85rem;color:var(--gray)">${data.email_sent ? "Oferta enviada a tu email." : "Genera el PDF y descárgalo abajo."}</p>`
-              + `<a class="outline" style="display:inline-block;margin-top:4px;text-decoration:none;padding:8px 14px;border-radius:6px" href="${API}${data.download_url}" target="_blank">Descargar PDF</a>`;
+              + `<a class="btn-download" href="${API}${data.download_url}" target="_blank">Descargar PDF</a>`;
           }
         }
       } catch (e) {
@@ -669,7 +676,7 @@
         }
         outputBox.innerHTML = `<p><b>Precio total: ${data.offer.final_price_eur.toFixed(2)} €</b></p>`
           + `<p style="font-size:0.85rem;color:var(--gray)">${data.email_sent ? "Oferta enviada a tu email." : "Genera el PDF y descárgalo abajo."}</p>`
-          + `<a class="outline" style="display:inline-block;margin-top:4px;text-decoration:none;padding:8px 14px;border-radius:6px" href="${API}${data.download_url}" target="_blank">Descargar PDF</a>`;
+          + `<a class="btn-download" href="${API}${data.download_url}" target="_blank">Descargar PDF</a>`;
       } catch (e) {
         outputBox.innerHTML = "<p style='color:#b00'>Error generando la oferta.</p>";
       }

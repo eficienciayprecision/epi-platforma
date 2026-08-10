@@ -49,6 +49,7 @@ def _load_catalog_from_csv(path: str) -> list[PumpModel]:
                 wetted_body_material=row.get("wetted_body_material") or None,
                 wetted_elastomer_material=row.get("wetted_elastomer_material") or None,
                 curve_reference_url=row.get("curve_reference_url") or None,
+                real_efficiency_pct=float(row["real_efficiency_pct"]) if row.get("real_efficiency_pct") else None,
             ))
     return rows
 

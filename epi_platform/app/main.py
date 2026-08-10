@@ -75,7 +75,7 @@ except Exception as _seed_error:  # nunca debe impedir que la app arranque
 
 app = FastAPI(
     title="EPi Engine API",
-    version="1.10.0",
+    version="1.11.0",
     description="Asistente IA para mecanica de fluidos — EPI S.L. Bilbao",
 )
 app.add_middleware(
@@ -124,17 +124,34 @@ def pump_row_to_selected(row: PumpModel) -> SelectedPump:
         wetted_body_material=row.wetted_body_material,
         wetted_elastomer_material=row.wetted_elastomer_material,
         curve_reference_url=row.curve_reference_url,
+        real_efficiency_pct=row.real_efficiency_pct,
     )
 
 
 def _query_technology(
     db: Session, flow: float, head: float, profile: InvestmentProfile,
     atex: bool, technology: PumpTechnology, relax_profile: bool = False,
+    density_kg_m3: float = 1000.0,
 ) -> List[PumpModel]:
+    # NUEVO — el catalogo de bombas esta baremado en agua (densidad
+    # 1000 kg/m3). En una CENTRIFUGA, a potencia de motor fija, el caudal
+    # real que puede dar con un fluido mas denso que el agua es MENOR (hace
+    # falta mas potencia para mover la misma cantidad de fluido), y con uno
+    # mas ligero es MAYOR — aproximacion estandar: caudal_real ~ caudal_agua
+    # x (1000/densidad_fluido). En vez de tocar cada fila del catalogo, se
+    # convierte el caudal pedido por el cliente a su "equivalente en agua"
+    # antes de comparar contra los rangos de caudal del catalogo (mismo
+    # resultado, mas simple). En bombas de desplazamiento positivo
+    # (engranajes, tornillo, peristaltica, neumaticas, piston) el caudal NO
+    # depende de la densidad -- ahi no se aplica ninguna correccion.
+    query_flow = flow
+    if technology in (PumpTechnology.CENTRIFUGA_MECANICO, PumpTechnology.CENTRIFUGA_MAGNETICO):
+        query_flow = flow * (density_kg_m3 / 1000.0)
+
     q = db.query(PumpModel).filter(
         PumpModel.technology == technology.value,
-        PumpModel.min_flow_m3h <= flow,
-        PumpModel.max_flow_m3h >= flow,
+        PumpModel.min_flow_m3h <= query_flow,
+        PumpModel.max_flow_m3h >= query_flow,
         PumpModel.max_head_m >= head,
     )
     if not relax_profile:
@@ -197,14 +214,14 @@ def select_from_db(
         return max(rows, key=lambda r: r.match_score or 0)
 
     for tech in ranked_allowed:
-        rows = _query_technology(db, flow, head, profile, atex, tech)
+        rows = _query_technology(db, flow, head, profile, atex, tech, density_kg_m3=hyd_req.density_kg_m3)
         if rows:
             return pump_row_to_selected(_best(rows)), reasoning
 
     # Ninguna bomba en el perfil de inversion pedido: relajamos el perfil
     # (pero NUNCA la tecnologia, que es una restriccion fisica, no de precio)
     for tech in ranked_allowed:
-        rows = _query_technology(db, flow, head, profile, atex, tech, relax_profile=True)
+        rows = _query_technology(db, flow, head, profile, atex, tech, relax_profile=True, density_kg_m3=hyd_req.density_kg_m3)
         if rows:
             return pump_row_to_selected(_best(rows)), reasoning
 
@@ -330,7 +347,7 @@ class PumpSelectRequest(BaseModel):
 
 @app.get("/health", tags=["System"])
 def health():
-    return {"status": "ok", "system": "EPi Platform", "version": "1.10.0"}
+    return {"status": "ok", "system": "EPi Platform", "version": "1.11.0"}
 
 
 @app.get("/", tags=["System"])

@@ -78,3 +78,79 @@ class HydraulicEngine:
             npsh_required_max_m=round(npsha * 0.95, 2) if npsha else None,
             velocity_warning=warning,
         )
+
+    # -------------------------------------------------------------------
+    # NUEVO — diametro economico optimo (calidad-precio). Un diametro mayor
+    # reduce la perdida de carga (menos potencia de bombeo, menos coste
+    # energetico) pero cuesta mas de tuberia. Se evaluan los DN estandar y
+    # se elige el de menor coste total a lo largo de un periodo de
+    # referencia (tuberia + energia), NO simplemente el mas barato de
+    # comprar ni el de menor perdida de carga a cualquier precio.
+    # -------------------------------------------------------------------
+
+    # DN comercial -> diametro interior aproximado en mm (PVC/acero, uso
+    # industrial general). Aproximacion razonable para preseleccionar el
+    # tamaño; el precio real de la tuberia en la oferta sigue viniendo del
+    # buscador de precios (PriceScraper), esto es solo para decidir el DN.
+    STANDARD_DN_MM = {
+        15: 16.0, 20: 21.6, 25: 27.4, 32: 36.0, 40: 41.8, 50: 53.0,
+        65: 68.8, 80: 80.8, 100: 105.0, 125: 130.0, 150: 155.0, 200: 205.0,
+    }
+    # Coste aproximado de tuberia instalada, €/metro, por cada DN (PVC/acero
+    # industrial, orden de magnitud de mercado — la oferta final usa precios
+    # reales via PriceScraper; esto solo sirve para comparar diametros entre si).
+    PIPE_COST_EUR_PER_M = {
+        15: 4.0, 20: 5.0, 25: 6.5, 32: 8.5, 40: 10.5, 50: 14.0,
+        65: 19.0, 80: 24.0, 100: 34.0, 125: 48.0, 150: 65.0, 200: 95.0,
+    }
+    ENERGY_PRICE_EUR_KWH = 0.15  # aproximacion tarifa industrial
+    REFERENCE_YEARS = 3          # periodo de amortizacion tipico para este calculo
+    REFERENCE_HOURS_PER_YEAR = 8760  # se asume funcionamiento continuo (caso conservador)
+
+    @classmethod
+    def recommend_diameter(
+        cls, flow_m3h: float, length_m: float, static_head_m: float,
+        k_accessories: float, density_kg_m3: float, viscosity_cp: float,
+        roughness_mm: float = 0.03,
+    ) -> dict:
+        """Evalua los DN estandar y devuelve el de mejor relacion
+        calidad-precio (coste de tuberia + coste energetico estimado a
+        REFERENCE_YEARS años), junto con el resto de opciones evaluadas
+        para que quede claro por que se ha descartado cada una."""
+        from app.schemas.epi_schemas import HydraulicCalculationRequest
+
+        options = []
+        for dn, id_mm in cls.STANDARD_DN_MM.items():
+            req = HydraulicCalculationRequest(
+                flow_m3h=flow_m3h, diameter_mm=id_mm, length_m=length_m,
+                static_head_m=static_head_m, k_accessories=k_accessories,
+                density_kg_m3=density_kg_m3, viscosity_cp=viscosity_cp,
+                roughness_mm=roughness_mm, fluid_name="",
+            )
+            engine = cls(req)
+            result = engine.compute()
+
+            pipe_cost = cls.PIPE_COST_EUR_PER_M[dn] * length_m
+            energy_cost = (
+                result.hydraulic_power_kw / 0.65  # potencia en eje, ~eficiencia media
+                * cls.REFERENCE_HOURS_PER_YEAR * cls.REFERENCE_YEARS
+                * cls.ENERGY_PRICE_EUR_KWH
+            )
+            total_cost = pipe_cost + energy_cost
+
+            options.append({
+                "dn": dn, "diameter_mm": id_mm, "velocity_ms": result.velocity_ms,
+                "total_head_loss_m": result.total_head_loss_m,
+                "pipe_cost_eur": round(pipe_cost, 2),
+                "energy_cost_eur_3y": round(energy_cost, 2),
+                "total_cost_eur_3y": round(total_cost, 2),
+                "velocity_ok": 1.0 <= result.velocity_ms <= 3.0,
+            })
+
+        # solo se comparan por coste las opciones con velocidad en rango
+        # razonable (evita "ganar" con un DN tan pequeño que la velocidad
+        # sea absurda, aunque salga barato de tuberia)
+        valid = [o for o in options if o["velocity_ok"]] or options
+        best = min(valid, key=lambda o: o["total_cost_eur_3y"])
+
+        return {"recommended": best, "all_options": options}

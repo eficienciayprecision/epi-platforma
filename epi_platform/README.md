@@ -1,5 +1,137 @@
 # EPi Platform — Eficiencia y Precisión Industrial S.L.
 
+## FIX 1.11.0 (agosto 2026): eficiencia real, diámetro económico óptimo, caudal por densidad
+
+Tres mejoras de ingeniería reales pedidas por Jon:
+
+### 1. Columna de eficiencia real por bomba
+
+Nueva columna `real_efficiency_pct` en el catálogo (y en `SelectedPump`,
+visible en la oferta cliente cuando hay dato). Calculada con la fórmula
+estándar η = (ρ·g·Q·H) / P_motor, usando el punto de mejor eficiencia
+estimado (no caudal máximo y altura máxima juntos — eso son los DOS
+EXTREMOS de la curva de una bomba, nunca ocurren a la vez, y multiplicarlos
+sobreestima mucho la potencia hidráulica real. Se usa una aproximación de
+BEP habitual en la industria: ~75% del caudal máximo, ~85% de la altura
+máxima). Solo se calcula para tecnologías de motor eléctrico (centrífugas,
+engranajes, tornillo helicoidal, peristáltica) — las neumáticas no, su
+"potencia" es consumo de aire, no sirve para esta fórmula.
+
+**153 bombas con eficiencia real calculada.** Se descartaron ~100 casos
+(sobre todo CDR Pompe y Sydex) donde el resultado salía fuera de un rango
+físicamente plausible (15-90%) — eso apunta a datos de altura/potencia
+inconsistentes en esas filas concretas del catálogo original, no a un
+fallo del cálculo; no se ha forzado ningún número sin sentido.
+
+### 2. Diámetro de tubería de mejor relación calidad-precio
+
+`HydraulicEngine.recommend_diameter()` (nuevo): evalúa los DN estándar
+comparando coste de tubería instalada vs coste energético estimado a 3
+años (mayor diámetro = menos pérdida de carga = menos potencia de bombeo,
+pero más caro de comprar) y elige el de menor coste total — no el más
+barato de comprar ni el de menor pérdida de carga a cualquier precio.
+
+Se ha conectado además un hueco real que había en el código: la pregunta
+de diámetro YA prometía "si no está definido, puedo proponer un DN con
+velocidad ~1.5 m/s", pero esa lógica nunca estaba implementada — si el
+cliente no sabía el diámetro, EPi se quedaba repitiendo la pregunta para
+siempre. Ahora, si el cliente responde "no lo sé" / "no está instalada" /
+"es nueva", se calcula el DN económico óptimo automáticamente y se avisa
+en la oferta de que se ha hecho así.
+
+### 3. Caudal real según densidad del fluido
+
+El catálogo de bombas está baremado en agua. Añadido:
+- Diccionario de fluidos ampliado (15 fluidos reconocidos con densidad y
+  viscosidad aproximadas, antes solo 5) en `interview.py`.
+- Si el fluido mencionado no se reconoce, ya NO se asume agua en
+  silencio — se avisa explícitamente en la oferta para que se confirme
+  antes de darla por definitiva.
+- En `main.py`, al buscar bombas **centrífugas** compatibles, el caudal
+  pedido se convierte a su equivalente en agua antes de comparar contra
+  el catálogo (aproximación estándar: a potencia de motor fija, el caudal
+  real baja con fluidos más densos que el agua, y sube con más ligeros).
+  **Importante**: esto NO se aplica a bombas de desplazamiento positivo
+  (engranajes, tornillo, peristáltica, neumáticas, pistón) — ahí el
+  caudal es prácticamente independiente de la densidad, aplicar la misma
+  corrección habría sido un error de ingeniería real.
+
+## FIX 1.10.4 (agosto 2026): Verderflex (peristálticas) — material del tubo casi completo
+
+Jon aclaró algo importante: en las bombas peristálticas SOLO el tubo está
+en contacto con el fluido — el cuerpo/carcasa no moja, así que da igual
+para la compatibilidad química. Cambio de enfoque:
+
+- El cuerpo de las 231 bombas Verderflex se marca como **N/A** (no aplica)
+  en vez de dejarlo en amarillo como "sin dato" — es información real
+  (no moja), no un hueco pendiente.
+- El material del tubo se decodificó a fondo de los códigos internos del
+  propio modelo, contrastado con folletos oficiales de Verderflex:
+  - Gama Dura/industrial: NR, NBR, NBRF, EPDM, CSM/Hypalon®, Verderprene
+    (los 6 tipos que mencionó Jon) — códigos completos y abreviados de
+    2 letras (BU=NBR/Buna, EP=EPDM, CS=CSM, FG=food grade), verificado
+    cruzando una referencia que tenía ambos códigos a la vez en la misma
+    descripción.
+  - Gama OEM/mini (Rapide, M-series, VP-series): Verderprene, Silicona o
+    Viton® (códigos VP/SI/VT pegados a un número) — un séptimo material
+    real que no estaba en la lista de 6 que dio Jon, confirmado con el
+    folleto oficial "Verderflex OEM Pump Program".
+
+**Resultado: 198/231 (86%) con tubo identificado.** Los 33 restantes son
+sobre todo mandos a distancia, repuestos sueltos sin tubo, o códigos sin
+patrón reconocible — no se ha inventado nada.
+
+## FIX 1.10.3 (agosto 2026): +224 bombas ARO con material (serie EVO)
+
+Encontrada y descifrada la serie ARO EVO (referencias "EB##..."/"EP##...",
+224 bombas de nuestra base) — confirmado con ficha oficial de ARO en
+directindustry.com ("Materials of construction: Aluminum, Stainless
+Steel, Cast-Iron, Polypropylene, Conductive-Polypropylene") y contrastado
+con un ejemplo real decodificado (EB10-AFFAA-CKV-00A = Aluminum Wetted
+Parts, confirmado en PumpCatalog.com). La letra justo tras el tamaño
+indica el material del cuerpo.
+
+Cucchi (serie FMG, la que más nos falta de esa marca) revisada a fondo
+sin éxito — no se localizó ningún código de material público para esa
+serie concreta; no se ha adivinado.
+
+**Cobertura actual**: 823/2059 con material de cuerpo en la base maestra
+completa (770/1480 en el catálogo operativo de EPi) — sube desde
+599/2059 de la ronda anterior.
+
+## FIX 1.10.2 (agosto 2026): fabricante ARO estandarizado + más material por descripción
+
+- **Fotos del equipo**: intentado de nuevo (recorte automático mejorado con
+  limpieza por componente conectado), pero sigue dando un resultado con
+  bordes duros poco profesionales — verificado con capturas reales, no
+  solo revisión de código. Se descarta definitivamente el recorte
+  automático. Alternativas reales: fotos nuevas ya con el fondo bueno
+  detrás, o edición manual por un profesional.
+
+- **Repuestos — fabricante ARO estandarizado**: las 5.134 referencias que
+  aparecían como "INGERSOLL RAND INDUSTRIAL IRELAND LTD." o "WP-ARO GMBH"
+  ahora dicen "ARO Ingersoll Rand", igual que en el catálogo de bombas.
+
+- **Repuestos — bomba compatible por referencia**: revisado a fondo, y hay
+  que ser honestos: el Excel origen (`Base_repuestos_sin_precio_0.xlsx`)
+  NO tiene ninguna columna de compatibilidad, y de una muestra de 5.000
+  descripciones, solo 6 mencionaban un modelo de bomba reconocible. No es
+  algo que se pueda rellenar con garantías a partir de los datos que
+  tenemos — inventarlo podría hacer que alguien pida el repuesto
+  equivocado para su bomba, que es peor que no tener el dato. Para
+  conseguirlo de verdad haría falta el catálogo de referencias cruzadas
+  oficial de ARO (que Jon podría pedir a su comercial ARO como
+  distribuidor) o revisar los despieces de cada familia de bomba a mano.
+
+- **Material de bombas — todas las marcas**: se encontró que muchas
+  descripciones (Cucchi, Sydex, CDR Pompe...) ya llevan el material
+  escrito en texto plano (ej. "STATOR NBR", "ETFE+PC/CF FPM") — antes no
+  se extraía de ahí. Aplicado a las 2.059 referencias: +10 cuerpo. Poco
+  volumen porque la mayoría de descripciones restantes (sobre todo Cucchi)
+  son genéricas ("BOMBA ENGRANAJES 0.75KW") sin material indicado en
+  ningún sitio de los datos que tenemos — no es un fallo de búsqueda,
+  es que el dato no está.
+
 ## FIX 1.10.0 (agosto 2026): la oferta de repuestos (y adhesivo) no se podía descargar
 
 Jon confirmó que la entrevista principal ya funciona bien de punta a

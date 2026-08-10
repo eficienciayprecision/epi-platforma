@@ -145,6 +145,11 @@ def generate_client_offer_pdf(offer: ClientOffer, output_path: str) -> str:
         f"{offer.pump.technology.value} — {offer.pump.brand} {offer.pump.model} "
         f"(perfil {offer.pump.profile.value})", body))
     elements.append(Paragraph(offer.pump.description, body))
+    if offer.pump.real_efficiency_pct:
+        elements.append(Paragraph(
+            f"Eficiencia real estimada: {offer.pump.real_efficiency_pct:.0f}% "
+            "(calculada a partir del caudal, altura y potencia de catálogo de este "
+            "modelo — no es un valor genérico por tecnología).", body))
     elements.append(Spacer(1, 6 * mm))
 
     elements.append(Paragraph("Materiales y piping incluidos", h2))
