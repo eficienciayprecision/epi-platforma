@@ -1,0 +1,31 @@
+version: "3.9"
+
+services:
+  db:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: epi_user
+      POSTGRES_PASSWORD: epi_password
+      POSTGRES_DB: epi_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - epi_db_data:/var/lib/postgresql/data
+
+  api:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      - db
+    environment:
+      DATABASE_URL: postgresql://epi_user:epi_password@db:5432/epi_db
+      EPI_JWT_SECRET: dev-only-secret-cambia-esto
+      # EPI_LLM_MODEL y OPENAI_API_KEY son opcionales:
+      # si no se definen, el agente de entrevista usa el modo "sin LLM" (preguntas guiadas por reglas).
+      # OPENAI_API_KEY: sk-...
+    ports:
+      - "8000:8000"
+
+volumes:
+  epi_db_data:
