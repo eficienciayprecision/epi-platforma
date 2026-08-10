@@ -1,5 +1,44 @@
 # EPi Platform — Eficiencia y Precisión Industrial S.L.
 
+## FIX URGENTE 1.9.8 (agosto 2026): la entrevista se quedaba en bucle infinito
+
+Jon reportó (con captura de pantalla) que EPi se quedaba repitiendo
+"¿Qué longitud total tiene la tubería (metros)?" para siempre, sin
+importar lo que contestara ("8 metros", "8", "8 metrps"). Bug real y
+grave — afectaba a la entrevista principal (dimensionamiento de bomba),
+no solo a un caso raro.
+
+**Causa**: la extracción de cada campo exigía que el número y una palabra
+clave concreta ("longitud"/"tubería"/"tubo" para la longitud, "altura"
+para el desnivel, "mm" para el diámetro...) aparecieran en el MISMO
+mensaje. La palabra clave estaba en la PREGUNTA, no hacía falta que el
+cliente la repitiera en la respuesta — así que un "8 metros" o un simple
+"8" nunca se capturaba, y el sistema volvía a preguntar lo mismo sin fin.
+Afectaba potencialmente a los 5 campos (caudal, altura, longitud,
+diámetro, fluido), no solo a longitud — fue el que Jon vio porque fue el
+que le tocó responder así.
+
+**Arreglo**: ahora, además de la extracción por palabra clave (que sigue
+funcionando igual para cuando el cliente da varios datos juntos en una
+frase), se empareja cada pregunta ya formulada con la respuesta que le
+siguió inmediatamente. Si esa respuesta no se captó por palabra clave, se
+usa tal cual como respuesta a ESA pregunta concreta (número suelto para
+los campos numéricos, texto tal cual para el fluido).
+
+**Importante — por qué el primer intento de arreglo no bastó**: el primer
+parche solo miraba la pregunta más reciente en cada turno, pero como el
+sistema no guarda memoria (recalcula todo desde cero cada vez, releyendo
+todos los mensajes), en el turno siguiente ese dato "se olvidaba" otra vez
+y el sistema retrocedía a preguntar por él. Solo se dio por bueno tras
+simular la conversación completa turno a turno y comprobar que el dato NO
+se pierde más adelante — no solo que la siguiente pregunta parezca
+correcta en el momento.
+
+Verificado con el caso exacto de la captura de Jon (incluida la errata
+"8 metrps"), con una conversación completa de principio a fin, y
+comprobando que dar todos los datos juntos en una sola frase — la otra
+forma de usarlo — sigue funcionando igual que antes.
+
 ## FIX 1.9.7 (agosto 2026): bomba de clapetas (chop-check) para adhesivos viscosos
 
 Jon pidió que para adhesivos MUY VISCOSOS/PASTOSOS se use una bomba de

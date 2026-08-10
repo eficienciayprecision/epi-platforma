@@ -195,19 +195,66 @@ class InterviewAgent:
 
     @classmethod
     def _rule_based(cls, user_message: str, history: List[dict]) -> dict:
-        """Fallback sin OpenAI: ya NO se basa solo en contar turnos — en cada
-        mensaje intenta extraer por palabras clave los datos que el cliente
-        ya haya dado (en cualquier orden, aunque los de todos juntos en la
-        primera respuesta), y solo pregunta por lo que de verdad falte."""
+        """Fallback sin OpenAI: en cada mensaje intenta extraer por palabras
+        clave los datos que el cliente ya haya dado (en cualquier orden,
+        aunque los de todos juntos en la primera respuesta), y solo
+        pregunta por lo que de verdad falte.
+
+        Ademas de la extraccion por palabra clave (que capta "3 metros de
+        altura" venga cuando venga), se empareja cada pregunta ya formulada
+        con la respuesta que le siguio: si esa respuesta concreta no se
+        capto por palabra clave (p.ej. el cliente contesta solo "8" o "8
+        metros" sin repetir "tuberia"), se usa tal cual como respuesta a
+        ESA pregunta — evita quedarse repitiendo la misma pregunta para
+        siempre. Este emparejamiento es lo que permite que el dato quede
+        fijado de forma permanente turno a turno (antes se recalculaba todo
+        desde cero en cada mensaje y el dato se "olvidaba" en el turno
+        siguiente si no volvia a coincidir por palabra clave)."""
         if "{" in user_message:
             return cls._parse_reply(user_message)
 
-        all_user_texts = [h.get("content", "") for h in history if h.get("role") == "user"] + [user_message]
+        required_order = ["flow_m3h", "static_head_m", "length_m", "diameter_mm", "fluid_name"]
+        question_for = {
+            "flow_m3h": "¿Que caudal necesita en m3/h? (Si no lo sabe: digame el volumen del deposito y en cuanto tiempo debe vaciarlo.)",
+            "static_head_m": "¿Cual es la altura estatica (desnivel vertical en metros) entre la aspiracion y el punto de descarga?",
+            "length_m": "¿Que longitud total tiene la tuberia (metros)?",
+            "diameter_mm": "¿Cual es el diametro interior de la tuberia (mm)? Si no esta definida, puedo proponer un DN con velocidad ~1.5 m/s.",
+            "fluid_name": "¿Que fluido bombea? (ej: agua, sosa caustica 30%, aceite...). Indique nombre y, si puede, densidad y viscosidad.",
+        }
+
+        # El frontend ya incluye el mensaje actual como ultimo elemento de
+        # `history` (lo añade antes de llamar al endpoint) — no hay que
+        # volver a añadirlo aparte.
+        all_user_texts = [h.get("content", "") for h in history if h.get("role") == "user"]
+        if not all_user_texts:
+            all_user_texts = [user_message]
 
         collected: dict = {}
         for t in all_user_texts:
             for k, v in cls._extract_fields(t).items():
                 collected.setdefault(k, v)
+
+        # Emparejar cada pregunta de campo ya formulada con la respuesta que
+        # le siguio inmediatamente, y usarla tal cual si la extraccion por
+        # palabra clave no la capto.
+        last_q = None
+        for h in history:
+            role = h.get("role")
+            if role == "assistant":
+                last_q = h.get("content", "")
+            elif role == "user" and last_q is not None:
+                field = next((f for f, q in question_for.items() if q == last_q), None)
+                if field and field not in collected:
+                    answer = h.get("content", "")
+                    if field == "fluid_name":
+                        txt = answer.strip()
+                        if txt and not re.fullmatch(r"[\d.,\s]+", txt):
+                            collected["fluid_name"] = txt
+                    else:
+                        m = re.search(r"(\d+\.?\d*)", answer.replace(",", "."))
+                        if m:
+                            collected[field] = float(m.group(1))
+                last_q = None
 
         process_flags = {
             "has_solids": False, "is_abrasive": False,
@@ -218,18 +265,10 @@ class InterviewAgent:
             for k, v in flags.items():
                 process_flags[k] = process_flags[k] or v
 
-        required_order = ["flow_m3h", "static_head_m", "length_m", "diameter_mm", "fluid_name"]
-        question_for = {
-            "flow_m3h": "¿Que caudal necesita en m3/h? (Si no lo sabe: digame el volumen del deposito y en cuanto tiempo debe vaciarlo.)",
-            "static_head_m": "¿Cual es la altura estatica (desnivel vertical en metros) entre la aspiracion y el punto de descarga?",
-            "length_m": "¿Que longitud total tiene la tuberia (metros)?",
-            "diameter_mm": "¿Cual es el diametro interior de la tuberia (mm)? Si no esta definida, puedo proponer un DN con velocidad ~1.5 m/s.",
-            "fluid_name": "¿Que fluido bombea? (ej: agua, sosa caustica 30%, aceite...). Indique nombre y, si puede, densidad y viscosidad.",
-        }
         missing = [f for f in required_order if f not in collected]
 
         if missing:
-            greeting = "Hola, soy EPi. " if not all_user_texts[:-1] else ""
+            greeting = "Hola, soy EPi. " if not history else ""
             return {"status": "incomplete", "message": greeting + question_for[missing[0]]}
 
         # Los 5 datos hidraulicos ya estan. Falta el bloque de proceso — se
