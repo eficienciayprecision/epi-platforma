@@ -19,7 +19,7 @@ from typing import List, Optional
 
 from fastapi import Depends, FastAPI, HTTPException, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.security import OAuth2PasswordRequestForm
 from pydantic import BaseModel, Field
@@ -75,7 +75,7 @@ except Exception as _seed_error:  # nunca debe impedir que la app arranque
 
 app = FastAPI(
     title="EPi Engine API",
-    version="1.11.0",
+    version="1.11.3",
     description="Asistente IA para mecanica de fluidos — EPI S.L. Bilbao",
 )
 app.add_middleware(
@@ -228,9 +228,9 @@ def select_from_db(
     return None, reasoning
 
 
-def default_materials(diameter_mm: float, length_m: float, use_scraper: bool = True) -> MaterialsBreakdown:
+def default_materials(diameter_mm: float, length_m: float, use_scraper: bool = True, parallel_pumps: bool = False) -> MaterialsBreakdown:
     scraper = PriceScraper(enable_web=use_scraper)
-    return scraper.build_materials_for_line(diameter_mm, length_m, commercial_engine)
+    return scraper.build_materials_for_line(diameter_mm, length_m, commercial_engine, parallel_pumps=parallel_pumps)
 
 
 def compute_full_solution(req: "FullSolutionRequest", db: Session) -> EPiFullSolution:
@@ -266,6 +266,7 @@ def compute_full_solution(req: "FullSolutionRequest", db: Session) -> EPiFullSol
             req.hydraulics_input.diameter_mm,
             req.hydraulics_input.length_m,
             use_scraper=req.use_scraper,
+            parallel_pumps=req.parallel_pumps,
         )
 
     client_id = req.client_id or f"REF-IND-BILBAO-{uuid.uuid4().hex[:4].upper()}"
@@ -275,6 +276,7 @@ def compute_full_solution(req: "FullSolutionRequest", db: Session) -> EPiFullSol
         network_status=req.network_status, contact=req.contact,
         technology_reasoning=tech_reasoning,
         chemical_compatibility=chem_check,
+        parallel_pumps=req.parallel_pumps,
     )
 
 
@@ -313,6 +315,11 @@ class FullSolutionRequest(BaseModel):
     network_status: str = "Tuberias Soldadas (Sin Parada)"
     custom_materials: Optional[List[dict]] = None
     use_scraper: bool = True
+    # NUEVO — dos bombas en paralelo (1 en servicio + 1 de reserva), para
+    # aplicaciones criticas que no admiten parada. Duplica el numero de
+    # valvulas (cada bomba necesita poder aislarse por separado) y el coste
+    # de la bomba en el presupuesto.
+    parallel_pumps: bool = False
     # NUEVO — sustituye al login del cliente. Nada aqui es obligatorio.
     contact: Optional[ContactInfo] = None
 
@@ -347,7 +354,7 @@ class PumpSelectRequest(BaseModel):
 
 @app.get("/health", tags=["System"])
 def health():
-    return {"status": "ok", "system": "EPi Platform", "version": "1.11.0"}
+    return {"status": "ok", "system": "EPi Platform", "version": "1.11.3"}
 
 
 @app.get("/", tags=["System"])
@@ -573,6 +580,67 @@ def list_leads(db: Session = Depends(get_db), _: User = Depends(require_staff)):
         }
         for r in rows
     ]
+
+
+@app.get("/api/v1/leads/csv", tags=["Interno — Leads"])
+def list_leads_csv(db: Session = Depends(get_db), _: User = Depends(require_staff)):
+    """NUEVO — todas las ofertas generadas por EPi (de cualquier tipo:
+    bomba completa, elemento suelto, repuesto, equipo de adhesivo...),
+    descargables como CSV para abrir directamente en Excel."""
+    import csv as _csv
+    import io as _io
+    rows = db.query(LeadModel).order_by(LeadModel.created_at.desc()).all()
+    buf = _io.StringIO()
+    w = _csv.writer(buf)
+    w.writerow(["Fecha", "Cliente ref.", "Empresa", "Contacto", "Teléfono", "Email",
+                "Precio final (€)", "Perfil", "Email enviado"])
+    for r in rows:
+        w.writerow([
+            r.created_at, r.client_id, r.company_name or "", r.contact_name or "",
+            r.phone or "", r.email or "", r.final_price_eur or "",
+            r.profile_selected or "", "Sí" if r.email_sent else "No",
+        ])
+    buf.seek(0)
+    from fastapi.responses import StreamingResponse
+    return StreamingResponse(
+        iter([buf.getvalue()]), media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=ofertas_epi.csv"},
+    )
+
+
+@app.get("/api/v1/leads/tabla", response_class=HTMLResponse, tags=["Interno — Leads"])
+def list_leads_html(db: Session = Depends(get_db), _: User = Depends(require_staff)):
+    """NUEVO — tabla sencilla en el navegador con todas las ofertas
+    generadas por EPi, sin necesidad de abrir el JSON ni el CSV. Requiere
+    usuario/contraseña interno (admin o ingeniero)."""
+    rows = db.query(LeadModel).order_by(LeadModel.created_at.desc()).limit(500).all()
+    trs = "".join(
+        f"<tr><td>{r.created_at}</td><td>{r.client_id}</td>"
+        f"<td>{r.company_name or ''}</td><td>{r.contact_name or ''}</td>"
+        f"<td>{r.email or ''}</td><td>{r.phone or ''}</td>"
+        f"<td>{f'{r.final_price_eur:,.2f} €' if r.final_price_eur else ''}</td>"
+        f"<td>{r.profile_selected or ''}</td>"
+        f"<td>{'✅' if r.email_sent else '—'}</td></tr>"
+        for r in rows
+    )
+    html = f"""<!DOCTYPE html><html><head><meta charset="utf-8">
+    <title>Ofertas EPi</title>
+    <style>
+      body{{font-family:'IBM Plex Sans',Arial,sans-serif;margin:24px;background:#f5f2e9;color:#1a2433}}
+      h1{{font-size:1.3rem}}
+      table{{border-collapse:collapse;width:100%;background:white;font-size:0.85rem}}
+      th,td{{border:1px solid #ccc;padding:6px 10px;text-align:left}}
+      th{{background:#0e2b4d;color:white;position:sticky;top:0}}
+      tr:nth-child(even){{background:#faf8f3}}
+      a{{color:#0e2b4d}}
+    </style></head><body>
+    <h1>Ofertas generadas por EPi ({len(rows)} más recientes)</h1>
+    <p><a href="/api/v1/leads/csv">Descargar como CSV</a></p>
+    <table><thead><tr><th>Fecha</th><th>Ref.</th><th>Empresa</th><th>Contacto</th>
+    <th>Email</th><th>Teléfono</th><th>Precio final</th><th>Perfil</th><th>Email enviado</th>
+    </tr></thead><tbody>{trs}</tbody></table>
+    </body></html>"""
+    return HTMLResponse(content=html)
 
 
 # ---------------------------------------------------------------------------

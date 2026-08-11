@@ -1,5 +1,74 @@
 # EPi Platform — Eficiencia y Precisión Industrial S.L.
 
+## FIX 1.11.3 (agosto 2026): contraseña interna cambiada
+
+Jon pidió cambiar la contraseña por defecto de los usuarios internos
+(admin/ingeniero) a una suya. Encontrado un problema real al hacerlo:
+`seed()` solo creaba estos usuarios si la tabla estaba VACÍA — cambiar el
+valor por defecto en el código no habría tenido ningún efecto en la base
+de datos de producción de Jon, que ya tiene esos usuarios creados desde
+el primer despliegue.
+
+Corregido: en cada arranque, si admin/ingeniero siguen teniendo la
+contraseña de fábrica ("changeme-2026"), se actualiza automáticamente a
+la nueva. Si Jon ya la hubiera cambiado por su cuenta a otra cosa, no se
+toca. **Nueva contraseña: `Epi1618++Render`** (usuarios: `admin` e
+`ingeniero`, ambos con la misma).
+
+## FIX 1.11.2 (agosto 2026): bombas en paralelo (4 válvulas), diámetros de entrada/salida, tabla de ofertas
+
+Jon corrigió dos cosas de la V40 y pidió una tercera:
+
+### 1. Válvulas: 2 normalmente, 4 si hay dos bombas en paralelo
+
+Nueva opción real (no solo texto): casilla "Aplicación crítica: incluir
+dos bombas en paralelo" en el panel de perfil de inversión. Al marcarla:
+- 4 válvulas en vez de 2 (cada bomba necesita poder aislarse por separado
+  sin parar la otra: aspiración + impulsión × 2 bombas).
+- Coste de la bomba duplicado en el presupuesto (son dos equipos físicos).
+- La oferta lo indica explícitamente en vez de dejarlo como sugerencia
+  genérica.
+
+### 2. Entrada y salida de bomba: diámetros independientes
+
+Antes se pedía una sola partida "2 válvulas DNxx" asumiendo el mismo
+diámetro para aspiración e impulsión. Jon señaló que no tienen por qué
+coincidir (muchas centrífugas tienen aspiración mayor que impulsión).
+Ahora son dos partidas separadas ("válvula de aspiración" / "válvula de
+impulsión"), cada una con aviso de que el diámetro exacto debe
+confirmarse contra la conexión real de la bomba concreta — no se asume
+que coinciden.
+
+### 3. Tabla con todas las ofertas de EPi
+
+Jon preguntó por dónde ver/descargar todas las ofertas que genera EPi.
+Buena noticia: ya se guardaban todas (de cualquier tipo — bomba completa,
+elemento suelto, repuesto, equipo de adhesivo) en la tabla `LeadModel` de
+la base de datos, sin que hiciera falta ningún servidor nuevo. Lo único
+que faltaba era una forma cómoda de verlas:
+- `GET /api/v1/leads/tabla` — tabla HTML sencilla en el navegador
+  (usuario/contraseña interno).
+- `GET /api/v1/leads/csv` — descarga directa en CSV para abrir en Excel.
+- `GET /api/v1/leads` — igual que antes, en JSON.
+
+## FIX 1.11.1 (agosto 2026): 4 válvulas → 2, bombas en paralelo, punto de acople
+
+Jon detectó que EPi metía siempre 4 válvulas de bola sin ningún criterio.
+Encontrado en `app/services/scraper.py`: `quantity=4` puesto a fuego, sin
+relación con la instalación real. Corregido a **2** — una en la
+aspiración y otra en la impulsión de la bomba (entrada y salida), mismo
+diámetro que la conexión de la bomba. Revisado el resto del proyecto por
+si había el mismo patrón duplicado en otro sitio — no lo había.
+
+Añadidas dos notas a la oferta cliente principal (`generate_client_offer_pdf`),
+verificadas generando el PDF de verdad:
+- Los materiales se acoplan desde la primera brida o conexión roscada
+  disponible — no incluye modificar tramos previos salvo que se indique.
+- Si la aplicación es crítica (no admite paradas), se recomienda valorar
+  dos bombas en paralelo (una de reserva) — como nota siempre visible en
+  la oferta, no ligada a una pregunta nueva de la entrevista, para no
+  añadir más pasos al cuestionario.
+
 ## FIX 1.11.0 (agosto 2026): eficiencia real, diámetro económico óptimo, caudal por densidad
 
 Tres mejoras de ingeniería reales pedidas por Jon:

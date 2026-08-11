@@ -129,21 +129,59 @@ def seed():
     # PASO 2: usuarios internos. Aislado en su propio try/except: un fallo
     # aqui (p.ej. de compatibilidad de bcrypt) no debe poder deshacer ni
     # bloquear el paso 1, que ya quedo guardado.
+    #
+    # NUEVO — antes esto solo insertaba admin/ingeniero si la tabla estaba
+    # VACIA, así que cambiar la contraseña por defecto en el codigo no
+    # tenia ningun efecto en una base de datos que ya tenia esos usuarios
+    # creados (el caso de Jon en produccion). Ahora se actualiza la
+    # contraseña de admin/ingeniero en cada arranque si siguen teniendo la
+    # contraseña por defecto de fabrica — si Jon ya la hubiera cambiado a
+    # otra cosa por su cuenta, no se toca.
     try:
-        if not db.query(UserModel).first():
-            hash_pw = pwd.hash(os.getenv("EPI_ADMIN_SEED_PASSWORD", "changeme-2026"))
+        seed_password = os.getenv("EPI_ADMIN_SEED_PASSWORD", "Epi1618++Render")
+        factory_default = "changeme-2026"
+        existing = {u.username: u for u in db.query(UserModel).filter(
+            UserModel.username.in_(["admin", "ingeniero"])
+        ).all()}
+
+        if not existing:
+            hash_pw = pwd.hash(seed_password)
             users = [
                 UserModel(username="admin", full_name="Administrador EPI", role="admin", hashed_password=hash_pw),
                 UserModel(username="ingeniero", full_name="Ingeniero de Proyecto", role="engineer", hashed_password=hash_pw),
             ]
             db.add_all(users)
             db.commit()
-            print("Insertados usuarios internos (admin, ingeniero). Cambia la contraseña por defecto.")
+            print("Insertados usuarios internos (admin, ingeniero) con la contraseña configurada.")
         else:
-            print("Usuarios internos ya existen.")
+            updated = 0
+            for username in ("admin", "ingeniero"):
+                user = existing.get(username)
+                if user is None:
+                    hash_pw = pwd.hash(seed_password)
+                    db.add(UserModel(
+                        username=username,
+                        full_name="Administrador EPI" if username == "admin" else "Ingeniero de Proyecto",
+                        role="admin" if username == "admin" else "engineer",
+                        hashed_password=hash_pw,
+                    ))
+                    updated += 1
+                    continue
+                try:
+                    still_default = pwd.verify(factory_default, user.hashed_password)
+                except Exception:
+                    still_default = False
+                if still_default:
+                    user.hashed_password = pwd.hash(seed_password)
+                    updated += 1
+            if updated:
+                db.commit()
+                print(f"Contraseña de usuarios internos actualizada ({updated} usuario(s)).")
+            else:
+                print("Usuarios internos ya existen con una contraseña ya personalizada (no se toca).")
     except Exception as user_seed_error:
         db.rollback()
-        print(f"AVISO: no se pudieron crear los usuarios internos (el catalogo de bombas SI se guardo bien): {user_seed_error}")
+        print(f"AVISO: no se pudieron crear/actualizar los usuarios internos (el catalogo de bombas SI se guardo bien): {user_seed_error}")
 
     db.close()
     print("Seed completado.")

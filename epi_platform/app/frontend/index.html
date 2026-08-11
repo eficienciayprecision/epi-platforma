@@ -307,6 +307,9 @@
           <label><input type="radio" name="profile" value="CALIDAD_PRECIO" checked /> <span class="badge">RECOMENDADA</span> Calidad-Precio</label>
           <label><input type="radio" name="profile" value="PREMIUM" /> Premium (crítica)</label>
         </div>
+        <div style="margin-top:10px">
+          <label style="font-size:0.85rem"><input type="checkbox" id="parallelPumpsCheck" /> Aplicación crítica: incluir dos bombas en paralelo (1 en servicio + 1 de reserva)</label>
+        </div>
         <div class="actions">
           <button class="gold" id="goBtn" disabled>Nosotros nos encargamos</button>
         </div>
@@ -493,6 +496,7 @@
             network_status: "Tuberias Soldadas (Sin Parada)",
             use_scraper: true,
             contact,
+            parallel_pumps: document.getElementById("parallelPumpsCheck").checked,
           }),
         });
         if (!r.ok) {

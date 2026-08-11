@@ -200,6 +200,7 @@ class ClientOffer(BaseModel):
     npsh_available_m: Optional[float] = None
     # NUEVO: a quien pertenece esta oferta
     contact: Optional[ContactInfo] = None
+    parallel_pumps: bool = False
 
 
 class InternalReport(BaseModel):

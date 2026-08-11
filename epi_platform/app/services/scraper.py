@@ -69,6 +69,7 @@ class PriceScraper:
         diameter_mm: float,
         length_m: float,
         commercial_engine: "CommercialEngine",
+        parallel_pumps: bool = False,
     ) -> MaterialsBreakdown:
         pipe = self._lookup_component("tuberia_inox_316L_m")
         valve = self._lookup_component("valvula_bola_inox")
@@ -80,15 +81,40 @@ class PriceScraper:
                 supplier=pipe["supplier"], quantity=length_m,
                 unit="m", unit_cost_real_eur=pipe["unit_cost"],
             ),
-            commercial_engine.build_material_line(
-                component=f"Válvulas de Bola Inox 3 Piezas DN{diameter_mm:.1f}",
-                supplier=valve["supplier"], quantity=4,
-                unit="ud", unit_cost_real_eur=valve["unit_cost"],
+        ]
+
+        # FIX — el numero de valvulas depende de si hay una bomba o dos en
+        # paralelo (cada bomba necesita su propia valvula de aspiracion y
+        # de impulsion para poder aislarla sin parar la otra). Ademas, la
+        # entrada y la salida de una bomba NO tienen por que ser del mismo
+        # diametro (muchas centrifugas tienen aspiracion mayor que
+        # impulsion) — se piden como dos partidas separadas en vez de una
+        # sola "x2 unidades", y se avisa de que el diametro exacto de cada
+        # una se debe confirmar contra la ficha de la bomba concreta.
+        n_bombas = 2 if parallel_pumps else 1
+        config_txt = " (bombas en paralelo — 1 en servicio + 1 de reserva)" if parallel_pumps else ""
+        lines.append(commercial_engine.build_material_line(
+            component=(
+                f"Válvulas de Bola Inox 3 Piezas — aspiración de bomba{config_txt}, "
+                f"DN{diameter_mm:.1f} orientativo (confirmar contra la conexión real de la bomba)"
             ),
+            supplier=valve["supplier"], quantity=n_bombas,
+            unit="ud", unit_cost_real_eur=valve["unit_cost"],
+        ))
+        lines.append(commercial_engine.build_material_line(
+            component=(
+                f"Válvulas de Bola Inox 3 Piezas — impulsión de bomba{config_txt}, "
+                f"DN{diameter_mm:.1f} orientativo (confirmar contra la conexión real de la bomba, "
+                "puede no coincidir con la de aspiración)"
+            ),
+            supplier=valve["supplier"], quantity=n_bombas,
+            unit="ud", unit_cost_real_eur=valve["unit_cost"],
+        ))
+        lines.append(
             commercial_engine.build_material_line(
                 component="Sensores de Presión y Caudal 4-20mA HART",
                 supplier=sensor["supplier"], quantity=2,
                 unit="ud", unit_cost_real_eur=sensor["unit_cost"],
-            ),
-        ]
+            )
+        )
         return commercial_engine.build_materials_breakdown(lines)

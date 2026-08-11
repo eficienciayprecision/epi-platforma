@@ -166,6 +166,23 @@ def generate_client_offer_pdf(offer: ClientOffer, output_path: str) -> str:
     ]))
     elements.append(table)
     elements.append(Spacer(1, 6 * mm))
+    elements.append(Paragraph(
+        "Los materiales suministrados se acoplarán desde la primera brida o conexión "
+        "roscada disponible de la instalación existente — no incluye modificar tramos, "
+        "soportación o conexiones previas a ese punto salvo que se indique expresamente.",
+        body))
+    if offer.parallel_pumps:
+        elements.append(Paragraph(
+            "Esta oferta incluye <b>dos bombas en paralelo</b> (una en servicio y otra de "
+            "reserva) por tratarse de una aplicación crítica que no admite paradas — el "
+            "número de válvulas y el coste de equipo reflejan las dos unidades.", body))
+    else:
+        elements.append(Paragraph(
+            "Si esta aplicación es crítica para su proceso (no admite paradas), recomendamos "
+            "valorar instalar dos bombas en paralelo — una en servicio y otra de reserva — "
+            "para garantizar la continuidad. Consulte con nosotros si quiere que se lo "
+            "incluyamos en la oferta.", body))
+    elements.append(Spacer(1, 6 * mm))
 
     try:
         sketch_labels = ["Aspiración / Depósito", f"{offer.pump.technology.value}"] + [

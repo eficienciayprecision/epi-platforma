@@ -122,6 +122,7 @@ class CommercialEngine:
         materials: MaterialsBreakdown,
         hydraulics: HydraulicCalculationResponse,
         contact: Optional[ContactInfo] = None,
+        parallel_pumps: bool = False,
     ) -> ClientOffer:
         client_materials: List[ClientOfferMaterial] = []
 
@@ -154,6 +155,7 @@ class CommercialEngine:
             velocity_ms=hydraulics.velocity_ms,
             npsh_available_m=hydraulics.npsh_available_m,
             contact=contact,
+            parallel_pumps=parallel_pumps,
         )
 
     # -------------------------------------------------------------------------
@@ -209,17 +211,28 @@ class CommercialEngine:
         contact: Optional[ContactInfo] = None,
         technology_reasoning: Optional[List[TechnologyRecommendation]] = None,
         chemical_compatibility: Optional[ChemicalCompatibilityResult] = None,
+        parallel_pumps: bool = False,
     ) -> EPiFullSolution:
         """Punto de entrada principal tras el botón "Nosotros nos encargamos"."""
+        # NUEVO — dos bombas en paralelo (1 en servicio + 1 de reserva):
+        # se duplica el coste base de la bomba (son dos equipos fisicos) y
+        # se marca en la descripcion para que quede claro en la oferta.
+        pump_cost = pump.base_cost_eur * 2 if parallel_pumps else pump.base_cost_eur
+        if parallel_pumps:
+            pump = pump.model_copy(update={
+                "description": (pump.description or "") +
+                " — CONFIGURACIÓN EN PARALELO: 2 unidades (1 en servicio + 1 de reserva)."
+            })
+
         commercial = self.calculate_commercial(
-            pump_base_cost_eur=pump.base_cost_eur,
+            pump_base_cost_eur=pump_cost,
             materials=materials,
             labor_engineering_eur=labor_engineering_eur,
         )
 
         client_offer = self.build_client_offer(
             commercial=commercial, pump=pump, materials=materials,
-            hydraulics=hydraulics, contact=contact,
+            hydraulics=hydraulics, contact=contact, parallel_pumps=parallel_pumps,
         )
 
         internal_report = self.build_internal_report(
