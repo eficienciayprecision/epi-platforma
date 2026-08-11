@@ -27,9 +27,38 @@ from __future__ import annotations
 
 import os
 import smtplib
+import time
 from email.message import EmailMessage
 from pathlib import Path
 from typing import Optional
+
+
+def _send_smtp_with_retry(host: str, port: int, use_tls: bool, user: Optional[str],
+                           password: Optional[str], msg: EmailMessage,
+                           attempts: int = 2, timeout: int = 20, retry_wait: int = 3) -> None:
+    """NUEVO — la conexion a Arsys desde Render a veces tarda mas de lo
+    esperado en vez de estar bloqueada del todo (se ha comprobado con datos
+    reales: unos envios llegan y otros no, en vez de fallar siempre) —
+    timeout mas generoso y un reintento en lugar de un unico intento corto,
+    que es lo que habia antes. 2 intentos x 20s deja un peor caso de ~43s
+    de espera al generar la oferta — mas que antes, pero sin disparar la
+    espera del cliente a mas de un minuto y medio."""
+    last_error = None
+    for attempt in range(1, attempts + 1):
+        try:
+            with smtplib.SMTP(host, port, timeout=timeout) as server:
+                if use_tls:
+                    server.starttls()
+                if user and password:
+                    server.login(user, password)
+                server.send_message(msg)
+            return
+        except Exception as e:
+            last_error = e
+            print(f"  intento {attempt}/{attempts} fallido: {type(e).__name__}: {e}")
+            if attempt < attempts:
+                time.sleep(retry_wait)
+    raise last_error
 
 
 def send_offer_email(
@@ -85,19 +114,14 @@ def send_offer_email(
         )
 
     try:
-        with smtplib.SMTP(host, port, timeout=15) as server:
-            if use_tls:
-                server.starttls()
-            if user and password:
-                server.login(user, password)
-            server.send_message(msg)
+        _send_smtp_with_retry(host, port, use_tls, user, password, msg)
         print(f"Email de oferta enviado correctamente a {to_email}")
         return True
     except Exception as e:
         # No tumbar la generacion de la oferta si falla el envio de correo,
         # pero SI dejar constancia en los logs del motivo exacto del fallo
         # (antes este bloque lo atrapaba en silencio y era invisible).
-        print(f"ERROR enviando email de oferta a {to_email}: {type(e).__name__}: {e}")
+        print(f"ERROR enviando email de oferta a {to_email} (tras varios intentos): {type(e).__name__}: {e}")
         return False
 
 
@@ -148,16 +172,11 @@ def send_internal_report_email(
         )
 
     try:
-        with smtplib.SMTP(host, port, timeout=15) as server:
-            if use_tls:
-                server.starttls()
-            if user and password:
-                server.login(user, password)
-            server.send_message(msg)
+        _send_smtp_with_retry(host, port, use_tls, user, password, msg)
         print(f"Email de informe interno enviado correctamente a {to_email}")
         return True
     except Exception as e:
-        print(f"ERROR enviando email de informe interno a {to_email}: {type(e).__name__}: {e}")
+        print(f"ERROR enviando email de informe interno a {to_email} (tras varios intentos): {type(e).__name__}: {e}")
         return False
 
 
@@ -201,14 +220,9 @@ def send_adhesive_followup_email(
     msg.set_content(cuerpo)
 
     try:
-        with smtplib.SMTP(host, port, timeout=15) as server:
-            if use_tls:
-                server.starttls()
-            if user and password:
-                server.login(user, password)
-            server.send_message(msg)
+        _send_smtp_with_retry(host, port, use_tls, user, password, msg)
         print(f"Email de seguimiento adhesivo 2K enviado correctamente a {to_email}")
         return True
     except Exception as e:
-        print(f"ERROR enviando email de seguimiento adhesivo 2K a {to_email}: {type(e).__name__}: {e}")
+        print(f"ERROR enviando email de seguimiento adhesivo 2K a {to_email} (tras varios intentos): {type(e).__name__}: {e}")
         return False

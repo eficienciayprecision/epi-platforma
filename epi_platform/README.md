@@ -1,5 +1,29 @@
 # EPi Platform — Eficiencia y Precisión Industrial S.L.
 
+## FIX 1.11.6 (agosto 2026): el email a veces sí llegaba — timeout corto, no bloqueo total
+
+Jon pasó la tabla real de `/api/v1/leads/tabla`: de 16 ofertas generadas,
+**2 sí tienen el email marcado como enviado**, en dos versiones distintas
+de EPi. Esto contradice la idea de que Render bloquea el puerto SMTP por
+completo — un bloqueo real (a nivel de red) fallaría el 100% de las
+veces, no ~el 12%. Apunta más bien a que la conexión hacia Arsys desde
+Render a veces tarda más de los 15 segundos que teníamos de margen, en
+vez de estar cortada del todo.
+
+**Cambio**: nueva función compartida `_send_smtp_with_retry()` en
+`email_service.py`, usada por las tres funciones de envío (oferta
+cliente, informe interno, seguimiento adhesivo 2K): 2 intentos, 20
+segundos de margen cada uno en vez de un único intento de 15s. Peor caso:
+~43 segundos de espera al generar la oferta (más que antes, pero sin
+disparar la espera a más de un minuto y medio).
+
+**No es una solución garantizada** — si de verdad hay algún tipo de
+limitación de red (aunque sea parcial, no un bloqueo absoluto), esto
+ayuda pero no lo arregla del todo. Si tras esta versión se sigue viendo
+un patrón de fallos alto, lo siguiente a probar sería mover el envío de
+email a segundo plano (que el cliente no tenga que esperar a que
+termine, y greintente más veces sin límite de tiempo de la petición).
+
 ## FIX URGENTE 1.11.5 (agosto 2026): columna nueva rompía el arranque entero (y por eso el login)
 
 Encontrado el motivo real de que el login no funcionara — no era un fallo
