@@ -1,5 +1,22 @@
 # EPi Platform — Eficiencia y Precisión Industrial S.L.
 
+## FIX 1.11.4 (agosto 2026): la tabla de ofertas no tenía forma real de loguearse
+
+Jon subió la V42 y no encontraba dónde entrar en `/api/v1/leads/tabla`.
+Fallo mío real: esas dos URLs (tabla y CSV) pedían el mismo tipo de acceso
+que usa el resto de la API interna — un token JWT que solo se puede
+conseguir haciendo una petición POST con usuario/contraseña (con
+Postman/curl), **no** navegando con el navegador normal. No había ninguna
+página de login que buscar porque nunca la hubo — el fallo era de diseño,
+no un botón escondido.
+
+Corregido: `/api/v1/leads/tabla` y `/api/v1/leads/csv` ahora usan
+autenticación básica HTTP (`require_staff_basic` en `app/auth.py`) — al
+entrar en la URL, el propio navegador saca su aviso nativo de
+usuario/contraseña, sin nada que buscar. Mismas cuentas de siempre
+(`admin` / `ingeniero`, contraseña `Epi1618++Render`). El resto de la API
+(la que usa la interfaz de EPi) sigue igual con JWT, sin tocar.
+
 ## FIX 1.11.3 (agosto 2026): contraseña interna cambiada
 
 Jon pidió cambiar la contraseña por defecto de los usuarios internos

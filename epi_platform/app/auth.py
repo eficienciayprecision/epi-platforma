@@ -123,3 +123,40 @@ def require_roles(*roles: UserRole):
 
 require_admin = require_roles(UserRole.ADMIN)
 require_staff = require_roles(UserRole.ADMIN, UserRole.ENGINEER)
+
+
+# ---------------------------------------------------------------------------
+# NUEVO — acceso por navegador (aviso nativo usuario/contraseña) para las
+# paginas pensadas para abrirse a mano (tabla de ofertas). El resto de la
+# API (la que usa el frontend de EPi) sigue con JWT como hasta ahora — esto
+# es solo para las 2-3 URLs que un humano visita directamente escribiendo
+# la direccion en el navegador, donde pedir un token por Postman/curl no
+# tiene sentido.
+# ---------------------------------------------------------------------------
+from fastapi.security import HTTPBasic, HTTPBasicCredentials
+
+_basic_security = HTTPBasic()
+
+
+def require_staff_basic(
+    credentials: HTTPBasicCredentials = Depends(_basic_security),
+    db: Session = Depends(get_db),
+) -> User:
+    """Al entrar en la URL, el navegador saca su aviso nativo de usuario y
+    contraseña (sin pagina de login que buscar) — mismas cuentas admin/
+    ingeniero que ya existen."""
+    row = db.query(UserModel).filter(UserModel.username == credentials.username).first()
+    valid_user = row is not None and not row.disabled
+    valid_password = valid_user and pwd_context.verify(credentials.password, row.hashed_password)
+    if not valid_user or not valid_password:
+        raise HTTPException(
+            status_code=401,
+            detail="Usuario o contraseña incorrectos",
+            headers={"WWW-Authenticate": "Basic"},
+        )
+    if UserRole(row.role) not in (UserRole.ADMIN, UserRole.ENGINEER):
+        raise HTTPException(status_code=403, detail="Rol no autorizado")
+    return User(
+        username=row.username, full_name=row.full_name,
+        role=UserRole(row.role), disabled=row.disabled, company=row.company or "",
+    )

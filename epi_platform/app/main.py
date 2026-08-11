@@ -28,7 +28,7 @@ from sqlalchemy.orm import Session
 from app.auth import (
     Token, User, UserCreate, UserRole,
     authenticate_user, create_access_token, hash_password,
-    require_staff, require_admin,
+    require_staff, require_admin, require_staff_basic,
     ACCESS_TOKEN_EXPIRE_MINUTES,
 )
 from app.db.database import get_db, engine, Base
@@ -75,7 +75,7 @@ except Exception as _seed_error:  # nunca debe impedir que la app arranque
 
 app = FastAPI(
     title="EPi Engine API",
-    version="1.11.3",
+    version="1.11.4",
     description="Asistente IA para mecanica de fluidos — EPI S.L. Bilbao",
 )
 app.add_middleware(
@@ -354,7 +354,7 @@ class PumpSelectRequest(BaseModel):
 
 @app.get("/health", tags=["System"])
 def health():
-    return {"status": "ok", "system": "EPi Platform", "version": "1.11.3"}
+    return {"status": "ok", "system": "EPi Platform", "version": "1.11.4"}
 
 
 @app.get("/", tags=["System"])
@@ -583,7 +583,7 @@ def list_leads(db: Session = Depends(get_db), _: User = Depends(require_staff)):
 
 
 @app.get("/api/v1/leads/csv", tags=["Interno — Leads"])
-def list_leads_csv(db: Session = Depends(get_db), _: User = Depends(require_staff)):
+def list_leads_csv(db: Session = Depends(get_db), _: User = Depends(require_staff_basic)):
     """NUEVO — todas las ofertas generadas por EPi (de cualquier tipo:
     bomba completa, elemento suelto, repuesto, equipo de adhesivo...),
     descargables como CSV para abrir directamente en Excel."""
@@ -609,7 +609,7 @@ def list_leads_csv(db: Session = Depends(get_db), _: User = Depends(require_staf
 
 
 @app.get("/api/v1/leads/tabla", response_class=HTMLResponse, tags=["Interno — Leads"])
-def list_leads_html(db: Session = Depends(get_db), _: User = Depends(require_staff)):
+def list_leads_html(db: Session = Depends(get_db), _: User = Depends(require_staff_basic)):
     """NUEVO — tabla sencilla en el navegador con todas las ofertas
     generadas por EPi, sin necesidad de abrir el JSON ni el CSV. Requiere
     usuario/contraseña interno (admin o ingeniero)."""
