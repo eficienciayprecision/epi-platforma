@@ -1,5 +1,39 @@
 # EPi Platform — Eficiencia y Precisión Industrial S.L.
 
+## FIX URGENTE 1.11.5 (agosto 2026): columna nueva rompía el arranque entero (y por eso el login)
+
+Encontrado el motivo real de que el login no funcionara — no era un fallo
+de contraseñas, era mucho más gordo: **la V39 (columna de eficiencia
+real) rompía el arranque completo desde entonces**, y nadie lo había
+notado porque el resto de EPi seguía funcionando con el catálogo viejo en
+caché de PostgreSQL.
+
+**La causa exacta**: `Base.metadata.create_all()` solo crea tablas que no
+existen — nunca añade columnas nuevas a una tabla que ya existe en
+producción. Al añadir `real_efficiency_pct` al modelo `PumpModel` en la
+V39, la tabla `pumps_catalog` de Jon en Render se quedó desincronizada:
+el código esperaba esa columna, la base de datos real no la tenía.
+Cualquier consulta a esa tabla (incluida el simple `count()` del
+arranque) reventaba con `UndefinedColumn`. Como ese fallo no estaba
+aislado, **abortaba todo `seed()`**, incluido el paso 2 (actualizar la
+contraseña de admin/ingeniero) que va después — la contraseña nunca se
+llegó a cambiar de `changeme-2026` a `Epi1618++Render`, así que el login
+con la nueva contraseña se rechazaba correctamente (la contraseña real en
+la base de datos seguía siendo la antigua).
+
+**Arreglo, en dos partes:**
+1. `_migrate_missing_columns()` (nuevo, en `seed.py`): tras crear las
+   tablas que falten, revisa las que ya existen y añade por SQL cualquier
+   columna que el modelo tenga pero la tabla real no — así una tabla de
+   producción nunca se vuelve a desincronizar del modelo silenciosamente.
+2. Aislados los tres pasos del arranque (catálogo de bombas, catálogo de
+   repuestos, usuarios internos) en sus propios `try/except`
+   independientes — un fallo en cualquiera de los dos primeros ya NUNCA
+   puede volver a bloquear la actualización de usuarios, pase lo que pase.
+
+Diagnosticado con los logs reales de Render que pasó Jon — no se ha
+tocado nada a ciegas.
+
 ## FIX 1.11.4 (agosto 2026): la tabla de ofertas no tenía forma real de loguearse
 
 Jon subió la V42 y no encontraba dónde entrar en `/api/v1/leads/tabla`.

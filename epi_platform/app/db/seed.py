@@ -90,8 +90,38 @@ def _load_spare_parts_from_csv(path: str) -> list:
     return rows
 
 
+def _migrate_missing_columns():
+    """NUEVO — Base.metadata.create_all() SOLO crea tablas que no existen;
+    NUNCA añade columnas nuevas a una tabla que ya existe en produccion.
+    Cada vez que se añade un campo a un modelo (p.ej. real_efficiency_pct
+    en agosto 2026) hay que añadirlo tambien aqui, o la tabla de Jon en
+    Render se queda desincronizada del modelo y CUALQUIER consulta a esa
+    tabla revienta con "column ... does not exist" — como paso el 11 de
+    agosto de 2026, bloqueando ademas la actualizacion de la contraseña de
+    los usuarios internos porque el fallo cortaba el arranque antes de
+    llegar a esa parte."""
+    import sqlalchemy as sa
+    inspector = sa.inspect(engine)
+    migrations = {
+        "pumps_catalog": [("real_efficiency_pct", "FLOAT")],
+    }
+    with engine.begin() as conn:
+        for table, columns in migrations.items():
+            if table not in inspector.get_table_names():
+                continue  # la creara create_all() si es tabla nueva
+            existing_cols = {c["name"] for c in inspector.get_columns(table)}
+            for col_name, col_type in columns:
+                if col_name not in existing_cols:
+                    conn.execute(sa.text(f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {col_name} {col_type}"))
+                    print(f"Migracion: añadida columna {table}.{col_name} ({col_type}).")
+
+
 def seed():
     Base.metadata.create_all(bind=engine)
+    try:
+        _migrate_missing_columns()
+    except Exception as migration_error:
+        print(f"AVISO: fallo en la migracion de columnas (se continua igualmente): {migration_error}")
     db = SessionLocal()
 
     # PASO 1: catalogo de bombas. Se guarda (commit) de inmediato, ANTES de
@@ -99,10 +129,24 @@ def seed():
     # con la creacion de usuarios en agosto 2026, un problema de version
     # entre passlib y bcrypt), el catalogo de bombas ya esta a salvo en la
     # base de datos y no se pierde con el resto de la transaccion.
-    catalog = _load_catalog_from_csv(CATALOG_CSV) if os.path.exists(CATALOG_CSV) else []
-    current_count = db.query(PumpModel).count()
+    #
+    # FIX (11 agosto 2026) — un fallo aqui (p.ej. columna desincronizada)
+    # abortaba TODO el arranque, incluido el paso 2 (usuarios internos) mas
+    # abajo, que ni siquiera llegaba a intentarse. Aislado en su propio
+    # try/except para que un problema con el catalogo NUNCA pueda bloquear
+    # la actualizacion de usuarios.
+    try:
+        catalog = _load_catalog_from_csv(CATALOG_CSV) if os.path.exists(CATALOG_CSV) else []
+        current_count = db.query(PumpModel).count()
+    except Exception as catalog_error:
+        db.rollback()
+        catalog = []
+        current_count = None
+        print(f"AVISO: no se pudo cargar el catalogo de bombas al arrancar: {catalog_error}")
 
-    if not catalog:
+    if current_count is None:
+        pass  # ya se aviso arriba; no se toca el catalogo esta vez
+    elif not catalog:
         print(f"AVISO: no se encontro {CATALOG_CSV}; el catalogo actual ({current_count} bombas) no se ha tocado.")
     elif current_count != len(catalog):
         db.query(PumpModel).delete()
@@ -113,18 +157,24 @@ def seed():
         print(f"Catalogo de bombas ya esta actualizado ({current_count} bombas).")
 
     # PASO 1b: catalogo de repuestos (independiente del de bombas).
-    from app.db.models import SparePartModel
-    spare_parts = _load_spare_parts_from_csv(SPARE_PARTS_CSV) if os.path.exists(SPARE_PARTS_CSV) else []
-    current_sp_count = db.query(SparePartModel).count()
-    if not spare_parts:
-        print(f"AVISO: no se encontro {SPARE_PARTS_CSV}; catalogo de repuestos ({current_sp_count}) no tocado.")
-    elif current_sp_count != len(spare_parts):
-        db.query(SparePartModel).delete()
-        db.add_all(spare_parts)
-        db.commit()
-        print(f"Catalogo de repuestos actualizado: {current_sp_count} antiguos sustituidos por {len(spare_parts)} nuevos.")
-    else:
-        print(f"Catalogo de repuestos ya esta actualizado ({current_sp_count} repuestos).")
+    # Aislado igual que el paso 1: un fallo aqui tampoco debe poder
+    # bloquear el paso 2 (usuarios internos).
+    try:
+        from app.db.models import SparePartModel
+        spare_parts = _load_spare_parts_from_csv(SPARE_PARTS_CSV) if os.path.exists(SPARE_PARTS_CSV) else []
+        current_sp_count = db.query(SparePartModel).count()
+        if not spare_parts:
+            print(f"AVISO: no se encontro {SPARE_PARTS_CSV}; catalogo de repuestos ({current_sp_count}) no tocado.")
+        elif current_sp_count != len(spare_parts):
+            db.query(SparePartModel).delete()
+            db.add_all(spare_parts)
+            db.commit()
+            print(f"Catalogo de repuestos actualizado: {current_sp_count} antiguos sustituidos por {len(spare_parts)} nuevos.")
+        else:
+            print(f"Catalogo de repuestos ya esta actualizado ({current_sp_count} repuestos).")
+    except Exception as spare_error:
+        db.rollback()
+        print(f"AVISO: no se pudo cargar el catalogo de repuestos al arrancar: {spare_error}")
 
     # PASO 2: usuarios internos. Aislado en su propio try/except: un fallo
     # aqui (p.ej. de compatibilidad de bcrypt) no debe poder deshacer ni
