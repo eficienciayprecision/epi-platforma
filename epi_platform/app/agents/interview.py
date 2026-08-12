@@ -70,12 +70,19 @@ class InterviewAgent:
         messages.extend(history)
         messages.append({"role": "user", "content": user_message})
 
+        model = os.getenv("EPI_LLM_MODEL", "gpt-4o-mini")
+        kwargs = {"model": model, "messages": messages}
+        if model.startswith("gpt-5"):
+            # Modelos de razonamiento (GPT-5.x): no admiten temperature libre
+            # (algunos la ignoran, otros dan error). Se usa reasoning_effort;
+            # "low" prioriza respuestas rapidas, adecuado para una entrevista
+            # conversacional turno a turno.
+            kwargs["reasoning_effort"] = os.getenv("EPI_LLM_REASONING_EFFORT", "low")
+        else:
+            kwargs["temperature"] = 0.2
+
         try:
-            response = _client.chat.completions.create(
-                model=os.getenv("EPI_LLM_MODEL", "gpt-4o-mini"),
-                messages=messages,
-                temperature=0.2,
-            )
+            response = _client.chat.completions.create(**kwargs)
             reply = response.choices[0].message.content.strip()
         except Exception as e:
             return {"status": "error", "message": f"Error LLM: {e}"}

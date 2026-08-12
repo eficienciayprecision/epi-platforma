@@ -23,6 +23,7 @@ services:
       EPI_JWT_SECRET: dev-only-secret-cambia-esto
       # EPI_LLM_MODEL y OPENAI_API_KEY son opcionales:
       # si no se definen, el agente de entrevista usa el modo "sin LLM" (preguntas guiadas por reglas).
+      # EPI_LLM_MODEL: gpt-5.5   # o gpt-4o-mini; con gpt-5* se usa reasoning_effort en vez de temperature
       # OPENAI_API_KEY: sk-...
     ports:
       - "8000:8000"
