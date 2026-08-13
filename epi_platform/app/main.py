@@ -90,6 +90,27 @@ if FRONTEND_DIR.exists():
 
 OUTPUT_DIR = Path(__file__).resolve().parent.parent / "generated"
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def _client_filename_slug(contact: Optional[object], fallback: str) -> str:
+    """NUEVO — nombre de cliente 'seguro' para usar en el nombre del PDF
+    (Oferta_EPI_<cliente>.pdf en vez del Oferta_Cliente_<REF-IND-...>.pdf
+    anterior). Prioriza empresa sobre persona de contacto; si no hay ninguno
+    de los dos, cae al identificador interno (cid) como antes."""
+    import re
+    import unicodedata
+
+    name = None
+    if contact is not None:
+        name = getattr(contact, "company_name", None) or getattr(contact, "contact_name", None)
+    if not name:
+        return fallback
+
+    # quita acentos, deja solo letras/numeros/espacios/guiones, y espacios -> "_"
+    normalized = unicodedata.normalize("NFKD", name).encode("ascii", "ignore").decode("ascii")
+    normalized = re.sub(r"[^A-Za-z0-9 _-]", "", normalized).strip()
+    normalized = re.sub(r"\s+", "_", normalized)
+    return normalized[:60] or fallback
 commercial_engine = CommercialEngine(labor_engineering_eur=1800.0)
 
 
@@ -493,8 +514,9 @@ def solution_oneshot(request: FullSolutionRequest, db: Session = Depends(get_db)
     """
     solution = compute_full_solution(request, db)
     cid = solution.internal_report.client_id
-    client_path = OUTPUT_DIR / f"Oferta_Cliente_{cid}.pdf"
-    internal_path = OUTPUT_DIR / f"Informe_Interno_{cid}.pdf"
+    client_slug = _client_filename_slug(request.contact, cid)
+    client_path = OUTPUT_DIR / f"Oferta_EPI_{client_slug}.pdf"
+    internal_path = OUTPUT_DIR / f"Informe_Interno_EPI_{client_slug}.pdf"
     generate_client_offer_pdf(solution.client_offer, str(client_path))
     generate_internal_report_pdf(solution.internal_report, str(internal_path))
 
@@ -537,7 +559,8 @@ def solution_oneshot(request: FullSolutionRequest, db: Session = Depends(get_db)
 @app.post("/api/v1/report/client-pdf", tags=["Cliente — Oferta"])
 def client_pdf(solution: EPiFullSolution):
     """Descarga directa de la oferta cliente. Publica."""
-    path = OUTPUT_DIR / f"Oferta_Cliente_{solution.internal_report.client_id}.pdf"
+    client_slug = _client_filename_slug(solution.client_offer.contact, solution.internal_report.client_id)
+    path = OUTPUT_DIR / f"Oferta_EPI_{client_slug}.pdf"
     generate_client_offer_pdf(solution.client_offer, str(path))
     return FileResponse(path, filename=path.name, media_type="application/pdf")
 
@@ -558,7 +581,8 @@ def download_generated_file(filename: str):
 @app.post("/api/v1/report/internal-pdf", tags=["Interno — Documentos"])
 def internal_pdf(solution: EPiFullSolution, _: User = Depends(require_staff)):
     """Solo personal interno. El cliente nunca ve este documento."""
-    path = OUTPUT_DIR / f"Informe_Interno_{solution.internal_report.client_id}.pdf"
+    client_slug = _client_filename_slug(solution.internal_report.contact, solution.internal_report.client_id)
+    path = OUTPUT_DIR / f"Informe_Interno_EPI_{client_slug}.pdf"
     generate_internal_report_pdf(solution.internal_report, str(path))
     return FileResponse(path, filename=path.name, media_type="application/pdf")
 
