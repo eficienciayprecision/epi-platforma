@@ -58,6 +58,14 @@ from app.services.scraper import PriceScraper
 from app.services.email_service import send_offer_email, send_internal_report_email, send_adhesive_followup_email
 from app.services.vision_service import identify_object_from_image
 
+# Blas — asistente comercial por WhatsApp, montado dentro de este mismo
+# servicio (mismo Postgres, mismo dominio, sin coste extra de otro servicio
+# en Render). Sus modelos (app.blas.models) se importan aqui para que
+# Base.metadata.create_all(...) cree tambien sus tablas (`conversations`,
+# `messages`) junto a las de EPi. Ver app/blas/router.py para las rutas.
+from app.blas import models as blas_models  # noqa: F401  (registra las tablas en Base.metadata)
+from app.blas.router import router as blas_router
+
 Base.metadata.create_all(bind=engine)
 
 # NUEVO (fix agosto 2026): antes el catalogo de bombas solo se cargaba si
@@ -87,6 +95,10 @@ app.add_middleware(
 FRONTEND_DIR = Path(__file__).resolve().parent / "frontend"
 if FRONTEND_DIR.exists():
     app.mount("/ui", StaticFiles(directory=str(FRONTEND_DIR), html=True), name="frontend")
+
+# Blas — todas sus rutas cuelgan de /blas (paginas, widget.js, webhook de
+# WhatsApp, bandeja interna). Ver app/blas/router.py.
+app.include_router(blas_router)
 
 OUTPUT_DIR = Path(__file__).resolve().parent.parent / "generated"
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
