@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8" />
+<title>Blas — bandeja interna</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<style>
+  :root{--navy:#0e2b4d;--navy-deep:#071527;--gold:#c9a24a;--gray:#6b7280;--border:#e2e5ea;}
+  *{box-sizing:border-box;}
+  body{font-family:-apple-system,Segoe UI,Roboto,sans-serif;margin:0;background:#f4f6f9;color:#111;}
+  header{background:var(--navy);color:#fff;padding:14px 20px;display:flex;align-items:center;gap:12px;}
+  header h1{font-size:1.05rem;margin:0;font-weight:600;}
+  header .sub{font-size:.72rem;opacity:.75;}
+  .layout{display:flex;height:calc(100vh - 58px);}
+  .list{width:340px;border-right:1px solid var(--border);overflow-y:auto;background:#fff;}
+  .list-item{padding:12px 16px;border-bottom:1px solid var(--border);cursor:pointer;}
+  .list-item:hover{background:#f8fafc;}
+  .list-item.active{background:#eef2ff;}
+  .list-item .name{font-weight:600;font-size:.88rem;}
+  .list-item .meta{font-size:.72rem;color:var(--gray);margin-top:2px;}
+  .list-item .state{display:inline-block;font-size:.65rem;text-transform:uppercase;letter-spacing:.03em;
+    background:var(--gold);color:var(--navy-deep);border-radius:4px;padding:1px 6px;margin-top:4px;}
+  .detail{flex:1;display:flex;flex-direction:column;}
+  .detail-header{padding:14px 20px;border-bottom:1px solid var(--border);background:#fff;}
+  .detail-header .row{font-size:.82rem;color:var(--gray);margin-top:2px;}
+  .messages{flex:1;overflow-y:auto;padding:16px 20px;display:flex;flex-direction:column;gap:8px;background:#e9edf3;}
+  .msg{max-width:60%;padding:8px 12px;border-radius:8px;font-size:.85rem;line-height:1.4;white-space:pre-wrap;}
+  .msg.in{align-self:flex-start;background:#fff;}
+  .msg.out{align-self:flex-end;background:#dcf8c6;}
+  .msg .ch{display:block;font-size:.62rem;color:var(--gray);margin-top:3px;}
+  .replybar{display:flex;gap:8px;padding:12px 20px;border-top:1px solid var(--border);background:#fff;}
+  .replybar input{flex:1;padding:9px 12px;border:1px solid var(--border);border-radius:6px;font-size:.85rem;}
+  .replybar button{background:var(--navy);color:#fff;border:none;border-radius:6px;padding:0 16px;cursor:pointer;font-size:.85rem;}
+  .empty{padding:40px;text-align:center;color:var(--gray);}
+  .token-gate{max-width:360px;margin:80px auto;text-align:center;}
+  .token-gate input{width:100%;padding:10px;border:1px solid var(--border);border-radius:6px;margin:10px 0;}
+  .token-gate button{background:var(--navy);color:#fff;border:none;border-radius:6px;padding:10px 18px;cursor:pointer;}
+</style>
+</head>
+<body>
+
+<div id="gate" class="token-gate">
+  <h2>Bandeja interna de Blas</h2>
+  <p style="color:var(--gray);font-size:.85rem;">Introduce el token interno (BLAS_INTERNAL_TOKEN) para entrar.</p>
+  <input id="tokenInput" type="password" placeholder="Token interno" />
+  <br /><button id="tokenBtn">Entrar</button>
+</div>
+
+<div id="app" style="display:none;">
+  <header>
+    <div>
+      <h1>Blas — conversaciones</h1>
+      <div class="sub">EFICIENCIA Y PRECISIÓN INDUSTRIAL S.L.</div>
+    </div>
+  </header>
+  <div class="layout">
+    <div class="list" id="list"></div>
+    <div class="detail">
+      <div class="detail-header" id="detailHeader"><div class="empty">Selecciona una conversación</div></div>
+      <div class="messages" id="messages"></div>
+      <div class="replybar" id="replybar" style="display:none;">
+        <input id="replyInput" type="text" placeholder="Responder por WhatsApp..." />
+        <button id="replyBtn">Enviar</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  // Montado bajo /blas (dentro de EPi) — API_BASE = origen + carpeta actual
+  // (quita el "/inbox" final), asi funciona sea cual sea el prefijo.
+  var API_BASE = window.location.origin + window.location.pathname.replace(/\/inbox\/?$/, "");
+  var TOKEN = window.localStorage.getItem("blas_internal_token") || "";
+  var currentId = null;
+
+  function headers() {
+    return { "Content-Type": "application/json", "X-Blas-Token": TOKEN };
+  }
+
+  function showApp() {
+    document.getElementById("gate").style.display = "none";
+    document.getElementById("app").style.display = "block";
+    loadList();
+  }
+
+  document.getElementById("tokenBtn").addEventListener("click", function () {
+    TOKEN = document.getElementById("tokenInput").value.trim();
+    window.localStorage.setItem("blas_internal_token", TOKEN);
+    showApp();
+  });
+
+  function loadList() {
+    fetch(API_BASE + "/api/internal/conversations", { headers: headers() })
+      .then(function (r) {
+        if (r.status === 401) { window.localStorage.removeItem("blas_internal_token"); location.reload(); }
+        return r.json();
+      })
+      .then(function (items) {
+        var list = document.getElementById("list");
+        list.innerHTML = "";
+        items.forEach(function (c) {
+          var div = document.createElement("div");
+          div.className = "list-item" + (c.id === currentId ? " active" : "");
+          div.innerHTML =
+            '<div class="name">' + (c.name || c.phone || "(sin nombre)") + '</div>' +
+            '<div class="meta">' + (c.phone || "") + (c.application_or_fluid ? " · " + c.application_or_fluid : "") + '</div>' +
+            '<span class="state">' + c.state.replace(/_/g, " ") + '</span>';
+          div.addEventListener("click", function () { loadDetail(c.id); });
+          list.appendChild(div);
+        });
+      });
+  }
+
+  function loadDetail(id) {
+    currentId = id;
+    fetch(API_BASE + "/api/internal/conversations/" + id, { headers: headers() })
+      .then(function (r) { return r.json(); })
+      .then(function (c) {
+        document.getElementById("detailHeader").innerHTML =
+          "<strong>" + (c.name || "(sin nombre)") + "</strong>" +
+          '<div class="row">Tel: ' + (c.phone || "-") + " · Estado: " + c.state.replace(/_/g, " ") + "</div>" +
+          '<div class="row">Aplicación/fluido: ' + (c.application_or_fluid || "-") + "</div>" +
+          '<div class="row">Email: ' + (c.email || "-") + " · Compras: " + (c.purchasing_email || "-") + "</div>";
+
+        var box = document.getElementById("messages");
+        box.innerHTML = "";
+        c.messages.forEach(function (m) {
+          var div = document.createElement("div");
+          div.className = "msg " + m.direction;
+          div.innerHTML = escapeHtml(m.body) + '<span class="ch">' + m.channel + "</span>";
+          box.appendChild(div);
+        });
+        box.scrollTop = box.scrollHeight;
+
+        document.getElementById("replybar").style.display = c.phone ? "flex" : "none";
+        loadList();
+      });
+  }
+
+  function escapeHtml(s) {
+    var d = document.createElement("div"); d.innerText = s; return d.innerHTML;
+  }
+
+  document.getElementById("replyBtn").addEventListener("click", function () {
+    var input = document.getElementById("replyInput");
+    var text = input.value.trim();
+    if (!text || !currentId) return;
+    fetch(API_BASE + "/api/internal/conversations/" + currentId + "/reply", {
+      method: "POST", headers: headers(), body: JSON.stringify({ text: text }),
+    }).then(function (r) {
+      if (!r.ok) { r.json().then(function (e) { alert("Error: " + (e.detail || r.status)); }); return; }
+      input.value = "";
+      loadDetail(currentId);
+    });
+  });
+
+  if (TOKEN) { showApp(); }
+</script>
+</body>
+</html>
