@@ -336,7 +336,7 @@
       interview: {
         label: "Mejorar mi instalación",
         endpoint: "/api/v1/interview/chat",
-        greeting: "Cuéntame los datos de tu instalación (caudal, altura, tubería, fluido...) o escribe 'hola' para empezar.",
+        greeting: "Antes de nada, dime: ¿quieres mejorar toda la instalación o solo cotizar la bomba? Escribe tu respuesta para empezar.",
         showProfilePanel: true,
       },
       efficiency: {
@@ -396,6 +396,7 @@
       document.getElementById("adhesiveResult").innerHTML = "";
       chat.innerHTML = "";
       goBtn.disabled = true;
+      goBtn.textContent = "Nosotros nos encargamos";
       document.getElementById("result").style.display = "none";
       document.getElementById("actionStatus").textContent = "";
       document.getElementById("chatStatus").textContent = "";
@@ -454,7 +455,17 @@
           document.getElementById("chatStatus").textContent = "";
         } else if (data.status === "complete" && mode === "interview") {
           lastData = data.data;
-          addMsg("Datos completos. Elige perfil y pulsa «Nosotros nos encargamos».", "bot");
+          // NUEVO — la entrevista ahora empieza preguntando si se quiere
+          // mejorar toda la instalación o solo cotizar la bomba (scope).
+          // Se adapta el texto/boton segun la respuesta, sin tocar el resto
+          // del flujo (los mismos datos hidraulicos sirven para ambos).
+          if (lastData.scope === "bomba") {
+            goBtn.textContent = "Ver precio de la bomba";
+            addMsg("Datos completos. Elige perfil y pulsa «Ver precio de la bomba».", "bot");
+          } else {
+            goBtn.textContent = "Nosotros nos encargamos";
+            addMsg("Datos completos. Elige perfil y pulsa «Nosotros nos encargamos».", "bot");
+          }
           goBtn.disabled = false;
           document.getElementById("chatStatus").className = "status ok";
           document.getElementById("chatStatus").textContent = "Listo para presupuestar";
@@ -533,6 +544,55 @@
       goBtn.disabled = false;
     }
 
+    // NUEVO — rama "solo la bomba" de la entrevista: mismo calculo
+    // hidraulico, pero sin piping/materiales/mano de obra, y mostrando por
+    // que se ha elegido esa tecnologia (antes ese razonamiento solo se
+    // mandaba al email interno de EPi, nunca al cliente).
+    async function pumpOnly() {
+      if (!lastData) {
+        document.getElementById("actionStatus").textContent = "Completa la entrevista primero";
+        return;
+      }
+      const profile = document.querySelector('input[name="profile"]:checked').value;
+      const contact = getContact();
+      const st = document.getElementById("actionStatus");
+      st.textContent = "Calculando + generando oferta...";
+      goBtn.disabled = true;
+      try {
+        const r = await fetch(API + "/api/v1/solution/pump-only", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ hydraulics_input: lastData, profile, contact }),
+        });
+        if (!r.ok) {
+          const err = await r.json().catch(() => ({}));
+          throw new Error(err.detail || ("Error " + r.status));
+        }
+        const data = await r.json();
+        window._lastPumpOnly = data.offer;
+        const price = data.offer.final_price_eur;
+        const pump = data.offer.pump;
+        const box = document.getElementById("result");
+        box.style.display = "block";
+        box.innerHTML =
+          "<div class='price'>" + price.toLocaleString("es-ES", { minimumFractionDigits: 2 }) + " EUR</div>" +
+          "<div>" + pump.brand + " — " + pump.model + " (" + pump.technology + ")</div>" +
+          "<div style='margin-top:6px;font-size:0.92em'>" + data.offer.justification + "</div>" +
+          (data.email_sent
+            ? "<div style='margin-top:8px;color:#1a7a3a'>Oferta enviada por email ✓</div>"
+            : "<div style='margin-top:8px'>PDF generado. Descárgalo abajo.</div>") +
+          "<div class='actions'>" +
+          "<a class='outline' href='" + API + data.download_url + "' target='_blank'>Descargar Oferta de Bomba</a>" +
+          "</div>";
+        st.className = "status ok";
+        st.textContent = "Solución lista";
+      } catch (e) {
+        st.className = "status err";
+        st.textContent = e.message;
+      }
+      goBtn.disabled = false;
+    }
+
     async function downloadPdf() {
       if (!window._lastFull) return;
       const r = await fetch(API + "/api/v1/report/client-pdf", {
@@ -550,7 +610,7 @@
 
     sendBtn.onclick = sendChat;
     msgInput.addEventListener("keydown", e => { if (e.key === "Enter") sendChat(); });
-    goBtn.onclick = oneshot;
+    goBtn.onclick = () => (lastData && lastData.scope === "bomba") ? pumpOnly() : oneshot();
 
     // NUEVO — boton de cierre del modo adhesivo: oferta con precio (1K) o
     // envio de seguimiento sin precio (2K).
