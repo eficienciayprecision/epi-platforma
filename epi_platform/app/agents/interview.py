@@ -18,10 +18,19 @@ except Exception:
 
 SYSTEM_PROMPT = """
 Eres EPi, un ingeniero tecnico de ventas senior en 'Eficiencia y Precision Industrial S.L.'.
-Tu objetivo es obtener 6 bloques de variables clave de un cliente para dimensionar una bomba
+Tu objetivo es obtener 7 bloques de variables clave de un cliente para dimensionar una bomba
 industrial, adaptandote a su nivel tecnico.
 
-LOS 6 BLOQUES OBJETIVO:
+BLOQUE 0 (SIEMPRE PRIMERO, ANTES DE CUALQUIER OTRA PREGUNTA):
+Pregunta si quiere mejorar/diseñar TODA la instalación (tuberías, válvulas, accesorios,
+mano de obra) o si SOLO necesita cotizar la bomba en sí (scope). Formula una unica
+pregunta clara, por ejemplo: "Antes de nada: ¿quiere que le ayude a mejorar toda la
+instalación, o solo necesita cotizar/cambiar la bomba?". Interpreta la respuesta como
+"instalacion" o "bomba" (si es ambigua, pregunta de nuevo con esas dos opciones explicitas).
+Este bloque NO cambia el resto de preguntas: en ambos casos necesitas los mismos datos
+hidraulicos (bloques 1-6) para poder dimensionar/seleccionar la bomba correctamente.
+
+LOS 6 BLOQUES HIDRAULICOS (despues del bloque 0):
 1. Caudal deseado (flow_m3h) en m3/h
 2. Altura estatica a vencer (static_head_m) en m
 3. Longitud de la tuberia (length_m) en m
@@ -51,8 +60,9 @@ REGLAS DE FORMATO:
 1. UNA sola pregunta a la vez.
 2. Tono profesional, servicial y educativo.
 3. NUNCA inventes condiciones de la instalacion.
-4. Cuando tengas TODA la informacion confirmada, responde UNICAMENTE con JSON estricto (sin texto extra):
-{"flow_m3h": float, "diameter_mm": float, "length_m": float, "static_head_m": float, "density_kg_m3": float, "viscosity_cp": float, "fluid_name": "string", "has_solids": bool, "is_abrasive": bool, "is_shear_sensitive": bool, "requires_continuous_flow": bool}
+4. Cuando tengas TODA la informacion confirmada (incluido el bloque 0), responde UNICAMENTE
+   con JSON estricto (sin texto extra), incluyendo "scope" con el valor "instalacion" o "bomba":
+{"scope": "instalacion|bomba", "flow_m3h": float, "diameter_mm": float, "length_m": float, "static_head_m": float, "density_kg_m3": float, "viscosity_cp": float, "fluid_name": "string", "has_solids": bool, "is_abrasive": bool, "is_shear_sensitive": bool, "requires_continuous_flow": bool}
 """
 
 
@@ -96,8 +106,17 @@ class InterviewAgent:
             try:
                 data = json.loads(json_match.group(0))
                 fluid = data.pop("fluid_name", "Agua")
+                # "scope" no forma parte de HydraulicCalculationRequest (es
+                # hidraulicamente irrelevante) — se extrae aparte y se
+                # reincorpora al payload plano que ve el frontend, para que
+                # pueda decidir si llamar a /solution/oneshot (instalacion
+                # completa) o a /solution/pump-only (solo la bomba).
+                scope = data.pop("scope", "instalacion")
+                if scope not in ("instalacion", "bomba"):
+                    scope = "instalacion"
                 req = HydraulicCalculationRequest(**data, fluid_name=fluid)
                 payload = req.model_dump()
+                payload["scope"] = scope
                 return {
                     "status": "complete",
                     "data": payload,
@@ -204,6 +223,23 @@ class InterviewAgent:
         return extracted
 
     @classmethod
+    def _extract_scope(cls, text: str) -> Optional[str]:
+        """NUEVO — interpreta la respuesta a la pregunta inicial (bloque 0):
+        ¿mejorar toda la instalación, o solo cotizar la bomba? Devuelve
+        "instalacion", "bomba", o None si la respuesta es ambigua/no dice
+        nada al respecto (en cuyo caso se sigue preguntando)."""
+        up = text.lower()
+        has_bomba = bool(re.search(r'\bbomba\b', up))
+        has_instal = bool(re.search(r'instalaci[oó]n', up))
+        if re.search(r'(solo|solamente|s[oó]lo|[uú]nicamente)[^.]{0,20}\bbomba\b', up):
+            return "bomba"
+        if has_instal and not has_bomba:
+            return "instalacion"
+        if has_bomba and not has_instal:
+            return "bomba"
+        return None
+
+    @classmethod
     def _extract_process_flags(cls, text: str) -> dict:
         up = text.lower()
         # negacion generica de todo el bloque ("no", "no lleva nada especial"...)
@@ -247,8 +283,11 @@ class InterviewAgent:
         if "{" in user_message:
             return cls._parse_reply(user_message)
 
-        required_order = ["flow_m3h", "static_head_m", "length_m", "diameter_mm", "fluid_name"]
+        required_order = ["scope", "flow_m3h", "static_head_m", "length_m", "diameter_mm", "fluid_name"]
         question_for = {
+            "scope": "Antes de nada: ¿quiere que le ayude a mejorar TODA la instalación (tuberías, "
+                     "válvulas, accesorios), o solo necesita cotizar/cambiar la BOMBA? Responda "
+                     "\"instalación\" o \"bomba\".",
             "flow_m3h": "¿Que caudal necesita en m3/h? (Si no lo sabe: digame el volumen del deposito y en cuanto tiempo debe vaciarlo.)",
             "static_head_m": "¿Cual es la altura estatica (desnivel vertical en metros) entre la aspiracion y el punto de descarga?",
             "length_m": "¿Que longitud total tiene la tuberia (metros)?",
@@ -267,6 +306,10 @@ class InterviewAgent:
         for t in all_user_texts:
             for k, v in cls._extract_fields(t).items():
                 collected.setdefault(k, v)
+            if "scope" not in collected:
+                scope_guess = cls._extract_scope(t)
+                if scope_guess:
+                    collected["scope"] = scope_guess
 
         # Emparejar cada pregunta de campo ya formulada con la respuesta que
         # le siguio inmediatamente, y usarla tal cual si la extraccion por
@@ -281,7 +324,13 @@ class InterviewAgent:
                 field = next((f for f, q in question_for.items() if q == last_q), None)
                 if field and field not in collected:
                     answer = h.get("content", "")
-                    if field == "fluid_name":
+                    if field == "scope":
+                        # Respuesta directa a la pregunta inicial: si no se
+                        # entiende con claridad, se asume "instalacion" (el
+                        # comportamiento de siempre) en vez de re-preguntar
+                        # indefinidamente.
+                        collected["scope"] = cls._extract_scope(answer) or "instalacion"
+                    elif field == "fluid_name":
                         txt = answer.strip()
                         if txt and not re.fullmatch(r"[\d.,\s]+", txt):
                             collected["fluid_name"] = txt
@@ -346,6 +395,7 @@ class InterviewAgent:
             return {"status": "incomplete", "message": block6_question}
 
         data = {
+            "scope": collected.get("scope", "instalacion"),
             "flow_m3h": collected["flow_m3h"],
             "diameter_mm": collected["diameter_mm"],
             "length_m": collected["length_m"],
