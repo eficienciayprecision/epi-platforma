@@ -86,6 +86,8 @@ def _load_spare_parts_from_csv(path: str) -> list:
                 descripcion=row["descripcion"],
                 fabricante=row["fabricante"],
                 precio_eur=float(row["precio_eur"]),
+                tipo_componente=row.get("tipo_componente") or None,
+                bomba_compatible=row.get("bomba_compatible") or None,
             ))
     return rows
 
@@ -104,7 +106,9 @@ def _migrate_missing_columns():
     inspector = sa.inspect(engine)
     migrations = {
         "pumps_catalog": [("real_efficiency_pct", "FLOAT")],
+        "spare_parts_catalog": [("tipo_componente", "VARCHAR"), ("bomba_compatible", "VARCHAR")],
     }
+    migrated_tables = set()
     with engine.begin() as conn:
         for table, columns in migrations.items():
             if table not in inspector.get_table_names():
@@ -114,12 +118,15 @@ def _migrate_missing_columns():
                 if col_name not in existing_cols:
                     conn.execute(sa.text(f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {col_name} {col_type}"))
                     print(f"Migracion: añadida columna {table}.{col_name} ({col_type}).")
+                    migrated_tables.add(table)
+    return migrated_tables
 
 
 def seed():
     Base.metadata.create_all(bind=engine)
+    migrated_tables = set()
     try:
-        _migrate_missing_columns()
+        migrated_tables = _migrate_missing_columns()
     except Exception as migration_error:
         print(f"AVISO: fallo en la migracion de columnas (se continua igualmente): {migration_error}")
     db = SessionLocal()
@@ -163,13 +170,20 @@ def seed():
         from app.db.models import SparePartModel
         spare_parts = _load_spare_parts_from_csv(SPARE_PARTS_CSV) if os.path.exists(SPARE_PARTS_CSV) else []
         current_sp_count = db.query(SparePartModel).count()
+        # NUEVO (agosto 2026) — si se acaban de añadir columnas nuevas a esta
+        # tabla (p.ej. tipo_componente/bomba_compatible), las filas ya
+        # existentes se quedarian con esas columnas a NULL para siempre,
+        # porque el numero de filas no cambia y por tanto nunca se cumpliria
+        # la condicion de "recargar". Forzamos una recarga completa esa vez.
+        needs_reload = "spare_parts_catalog" in migrated_tables
         if not spare_parts:
             print(f"AVISO: no se encontro {SPARE_PARTS_CSV}; catalogo de repuestos ({current_sp_count}) no tocado.")
-        elif current_sp_count != len(spare_parts):
+        elif current_sp_count != len(spare_parts) or needs_reload:
             db.query(SparePartModel).delete()
             db.add_all(spare_parts)
             db.commit()
-            print(f"Catalogo de repuestos actualizado: {current_sp_count} antiguos sustituidos por {len(spare_parts)} nuevos.")
+            reason = "columnas nuevas migradas" if needs_reload and current_sp_count == len(spare_parts) else f"{current_sp_count} antiguos sustituidos por {len(spare_parts)} nuevos"
+            print(f"Catalogo de repuestos actualizado: {reason}.")
         else:
             print(f"Catalogo de repuestos ya esta actualizado ({current_sp_count} repuestos).")
     except Exception as spare_error:

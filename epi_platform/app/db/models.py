@@ -49,6 +49,12 @@ class SparePartModel(Base):
     descripcion = Column(Text, default="")
     fabricante = Column(String, default="", index=True)
     precio_eur = Column(Float, nullable=False)
+    # NUEVO (agosto 2026): que tipo de pieza es y para que bomba/familia de
+    # bombas sirve, para que la oferta de un repuesto suelto ya lo explique
+    # sin que el cliente tenga que preguntar. NULL/"" cuando no se ha podido
+    # identificar con certeza a partir del texto de origen (no se inventa).
+    tipo_componente = Column(String, nullable=True)
+    bomba_compatible = Column(String, nullable=True)
 
 
 class UserModel(Base):
