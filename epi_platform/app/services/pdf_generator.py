@@ -442,7 +442,21 @@ def generate_spare_part_offer_pdf(offer, output_path: str) -> str:
         elements.append(Spacer(1, 6 * mm))
 
     elements.append(Paragraph(f"<b>Precio total final:</b> {offer.final_price_eur:,.2f} €", h2))
-    elements.append(Spacer(1, 4 * mm))
+    elements.append(Spacer(1, 3 * mm))
+
+    # NUEVO (agosto 2026): que pieza es y para que bomba/familia de bombas
+    # sirve, cuando se ha podido identificar — para que el cliente no tenga
+    # que preguntarlo. Si no se ha podido identificar con certeza, no se
+    # inventa: simplemente no se muestra esa línea.
+    identif_lines = []
+    if getattr(offer, "tipo_componente", None):
+        identif_lines.append(f"<b>Tipo de componente:</b> {offer.tipo_componente}")
+    if getattr(offer, "bomba_compatible", None):
+        identif_lines.append(f"<b>Compatible con:</b> {offer.bomba_compatible}")
+    if identif_lines:
+        elements.append(Paragraph("<br/>".join(identif_lines), body))
+        elements.append(Spacer(1, 3 * mm))
+
     elements.append(Paragraph(
         "Esta oferta ha sido generada mediante inteligencia artificial (asistente EPi) "
         "a partir de los datos aportados. Tiene carácter orientativo y no es vinculante "
