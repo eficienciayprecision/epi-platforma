@@ -862,6 +862,8 @@ def buscar_repuesto(referencia: str, db: Session = Depends(get_db)):
                 "descripcion": r.descripcion,
                 "fabricante": r.fabricante,
                 "precio_eur": r.precio_eur,
+                "tipo_componente": r.tipo_componente,
+                "bomba_compatible": r.bomba_compatible,
             }
             for r in rows
         ],
@@ -883,6 +885,8 @@ def oferta_repuesto(request: SparePartQuoteRequest, db: Session = Depends(get_db
         unit_price_eur=part.precio_eur,
         final_price_eur=final_price,
         contact=request.contact,
+        tipo_componente=part.tipo_componente,
+        bomba_compatible=part.bomba_compatible,
     )
 
     client_path = OUTPUT_DIR / f"Oferta_Repuesto_{part.referencia}_{uuid.uuid4().hex[:6]}.pdf"
