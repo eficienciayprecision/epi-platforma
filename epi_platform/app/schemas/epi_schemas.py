@@ -203,6 +203,31 @@ class ClientOffer(BaseModel):
     parallel_pumps: bool = False
 
 
+class PumpOnlyOffer(BaseModel):
+    """NUEVO (agosto 2026) — oferta de SOLO la bomba (sin piping/instalacion),
+    cuando el cliente responde "solo la bomba" a la pregunta inicial de la
+    entrevista. A diferencia de SingleItemOffer (un elemento cualquiera
+    identificado por foto), esta va siempre ligada a un calculo hidraulico
+    real y muestra el razonamiento de por que se ha elegido esa tecnologia
+    de bomba — antes ese razonamiento solo llegaba al email interno de EPi
+    (InternalReport.technology_reasoning); aqui se traduce a texto y se
+    manda tambien al cliente."""
+
+    final_price_eur: float
+    pump: SelectedPump
+    fluid_name: str
+    flow_m3h: float
+    tdh_m: float
+    velocity_ms: float
+    # todas las tecnologias fisicamente aptas para esta aplicacion (no solo
+    # la elegida), para que el cliente vea que otras opciones existen
+    compatible_technologies: List[TechnologyRecommendation] = []
+    # texto en prosa explicando por que la tecnologia elegida es la mejor
+    # opcion para este caso, generado a partir de TechnologyRecommendation.reasons
+    justification: str = ""
+    contact: Optional[ContactInfo] = None
+
+
 class InternalReport(BaseModel):
     consultation_date: date
     client_id: str
