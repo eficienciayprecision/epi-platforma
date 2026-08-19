@@ -38,7 +38,7 @@ from app.schemas.epi_schemas import (
     HydraulicCalculationRequest, HydraulicCalculationResponse,
     SelectedPump, MaterialsBreakdown, EPiFullSolution, ContactInfo,
     ObjectIdentificationResult, ItemQuoteRequest, SingleItemSolution,
-    SparePartQuoteRequest, SparePartOffer,
+    SparePartQuoteRequest, SparePartOffer, PumpOnlyOffer,
     AdhesiveFollowupRequest, AdhesiveOfferRequest, AdhesiveEquipmentOffer, AdhesiveEquipmentItem,
 )
 from app.engine.hydraulics import HydraulicEngine
@@ -53,6 +53,7 @@ from app.services.pdf_generator import (
     generate_client_offer_pdf, generate_internal_report_pdf,
     generate_single_item_offer_pdf, generate_single_item_internal_pdf,
     generate_spare_part_offer_pdf, generate_adhesive_equipment_offer_pdf,
+    generate_pump_only_offer_pdf,
 )
 from app.services.scraper import PriceScraper
 from app.services.email_service import send_offer_email, send_internal_report_email, send_adhesive_followup_email
@@ -357,6 +358,18 @@ class FullSolutionRequest(BaseModel):
     contact: Optional[ContactInfo] = None
 
 
+class PumpOnlySolutionRequest(BaseModel):
+    """NUEVO (agosto 2026) — cuando el cliente responde "solo la bomba" (no
+    instalación completa) a la primera pregunta de la entrevista. Mismos
+    datos hidraulicos que FullSolutionRequest, pero sin piping/materiales:
+    solo se calcula, selecciona y precia la bomba."""
+    hydraulics_input: HydraulicCalculationRequest
+    profile: InvestmentProfile = InvestmentProfile.CALIDAD_PRECIO
+    is_atex_required: bool = False
+    client_id: Optional[str] = None
+    contact: Optional[ContactInfo] = None
+
+
 class EnergyRequest(BaseModel):
     flow_m3h: float = Field(..., gt=0)
     head_m: float = Field(..., gt=0)
@@ -565,6 +578,106 @@ def solution_oneshot(request: FullSolutionRequest, db: Session = Depends(get_db)
         "lead_id": lead.id,
         "email_sent": email_sent,
         "internal_email_sent": internal_email_sent,
+    }
+
+
+@app.post("/api/v1/solution/pump-only", tags=["Cliente — Oferta"])
+def solution_pump_only(request: PumpOnlySolutionRequest, db: Session = Depends(get_db)):
+    """NUEVO (agosto 2026) — rama "solo la bomba" de la primera pregunta de
+    la entrevista (ver InterviewAgent). A diferencia de /solution/oneshot,
+    NO calcula ni cotiza piping/materiales/mano de obra: solo selecciona la
+    bomba, la precia, y explica al CLIENTE (no solo en el email interno de
+    EPi, como antes) por que esa tecnologia es la mas adecuada y que otras
+    tecnologias tambien serian aptas para esta aplicacion."""
+    hyd = HydraulicEngine(request.hydraulics_input).compute()
+    pump, tech_reasoning = select_from_db(
+        db, hyd.flow_m3h, hyd.total_dynamic_head_m, request.profile, request.is_atex_required,
+        hydraulics_req=request.hydraulics_input,
+    )
+    if not pump:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No hay bomba para perfil {request.profile.value} "
+                   f"Q={hyd.flow_m3h} TDH={hyd.total_dynamic_head_m} "
+                   f"con una tecnologia apta para el proceso descrito.",
+        )
+    if pump.technology not in (PumpTechnology.NEUMATICA_DOBLE_MEMBRANA, PumpTechnology.PISTON_NEUMATICO):
+        pump = pump.model_copy(update={"recommended_motor_kw": hyd.recommended_motor_kw})
+
+    # Sin piping/materiales/mano de obra: el 38% de contingencia se aplica
+    # solo sobre el coste de la bomba, igual que en la oferta completa se
+    # aplica sobre bomba+materiales+mano de obra (misma regla de negocio,
+    # solo que aqui los otros dos sumandos son cero).
+    empty_materials = MaterialsBreakdown(lines=[], total_cost_real_eur=0.0, total_pvp_with_40_eur=0.0)
+    commercial = commercial_engine.calculate_commercial(
+        pump_base_cost_eur=pump.base_cost_eur, materials=empty_materials, labor_engineering_eur=0.0,
+    )
+
+    # NUEVO — traduccion a prosa, para el cliente, del razonamiento que
+    # PumpTechnologyAdvisor ya calculaba pero que antes solo viajaba dentro
+    # de InternalReport.technology_reasoning (solo visible en el email
+    # interno de EPi, nunca en la oferta que recibe el cliente).
+    winner = next((r for r in tech_reasoning if r.technology == pump.technology), None)
+    if winner and winner.reasons:
+        justification = (
+            f"Se ha recomendado la tecnología {pump.technology.value} porque "
+            + "; ".join(reason[0].lower() + reason[1:] for reason in winner.reasons) + "."
+        )
+    else:
+        justification = (
+            f"La tecnología {pump.technology.value} es la más adecuada para las "
+            "condiciones de caudal, altura y proceso descritas."
+        )
+    compatible = [r for r in tech_reasoning if r.suitable] or tech_reasoning
+
+    offer = PumpOnlyOffer(
+        final_price_eur=commercial.final_client_price_eur,
+        pump=pump,
+        fluid_name=hyd.fluid_name,
+        flow_m3h=hyd.flow_m3h,
+        tdh_m=hyd.total_dynamic_head_m,
+        velocity_ms=hyd.velocity_ms,
+        compatible_technologies=compatible,
+        justification=justification,
+        contact=request.contact,
+    )
+
+    client_id = request.client_id or f"REF-BOMBA-{uuid.uuid4().hex[:4].upper()}"
+    client_slug = _client_filename_slug(request.contact, client_id)
+    client_path = OUTPUT_DIR / f"Oferta_Bomba_EPI_{client_slug}.pdf"
+    generate_pump_only_offer_pdf(offer, str(client_path))
+
+    email_sent = False
+    if request.contact and request.contact.email:
+        email_sent = send_offer_email(
+            to_email=request.contact.email,
+            contact_name=request.contact.contact_name,
+            company_name=request.contact.company_name,
+            pdf_path=str(client_path),
+            final_price_eur=commercial.final_client_price_eur,
+        )
+
+    lead = LeadModel(
+        contact_name=request.contact.contact_name if request.contact else None,
+        company_name=request.contact.company_name if request.contact else None,
+        phone=request.contact.phone if request.contact else None,
+        email=request.contact.email if request.contact else None,
+        client_id=client_id,
+        final_price_eur=commercial.final_client_price_eur,
+        profile_selected=request.profile.value,
+        email_sent=email_sent,
+        solution_snapshot=offer.model_dump(mode="json"),
+    )
+    db.add(lead)
+    db.commit()
+    db.refresh(lead)
+
+    return {
+        "offer": offer.model_dump(),
+        "client_pdf": str(client_path),
+        "download_url": f"/api/v1/download/{client_path.name}",
+        "lead_id": lead.id,
+        "email_sent": email_sent,
     }
 
 
