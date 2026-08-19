@@ -12,7 +12,7 @@ from reportlab.lib.enums import TA_CENTER
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 
-from app.schemas.epi_schemas import ClientOffer, InternalReport, SingleItemOffer, SingleItemInternalReport
+from app.schemas.epi_schemas import ClientOffer, InternalReport, SingleItemOffer, SingleItemInternalReport, PumpOnlyOffer
 from app.services.pump_curve import build_curve_drawing
 from app.services.installation_sketch import build_installation_sketch
 
@@ -216,6 +216,111 @@ def generate_client_offer_pdf(offer: ClientOffer, output_path: str) -> str:
         pass  # si la generacion de la curva falla, no bloquea el resto de la oferta
 
     elements.append(Spacer(1, 6 * mm))
+    elements.append(Paragraph(
+        "<b>En caso de aceptación del presupuesto</b>, envíe el pedido oficial a "
+        "<b>pedidos@eficienciayprecisionindustrial.com</b>. Si no recibe confirmación de "
+        "la recepción de su pedido, es posible que este no se haya tramitado — "
+        "por favor, contacte con nosotros en ese caso.", body))
+    elements.append(Spacer(1, 4 * mm))
+    elements.append(Paragraph("Propuesta válida durante 30 días naturales.", body))
+
+    doc.build(elements, onFirstPage=_footer_canvas, onLaterPages=_footer_canvas)
+    return output_path
+
+
+def generate_pump_only_offer_pdf(offer: PumpOnlyOffer, output_path: str) -> str:
+    """NUEVO (agosto 2026) — oferta de SOLO la bomba, cuando el cliente ha
+    respondido "solo la bomba" (no instalacion completa) a la primera
+    pregunta de la entrevista. Sin tabla de materiales/piping (no aplica).
+    A diferencia de la oferta completa, aqui SI se explica al cliente por
+    que se ha elegido esa tecnologia y que otras tecnologias tambien serian
+    aptas — antes ese razonamiento solo se mandaba al email interno de EPi."""
+    doc = SimpleDocTemplate(output_path, pagesize=A4, bottomMargin=30 * mm)
+    elements = []
+    _company_header(elements, "Oferta de Bomba — Asistente de IA EPi")
+
+    if offer.contact and (offer.contact.company_name or offer.contact.contact_name):
+        dest = offer.contact.company_name or offer.contact.contact_name
+        elements.append(Paragraph(f"Para: {dest}", body))
+        if offer.contact.contact_name and offer.contact.company_name:
+            elements.append(Paragraph(f"At./ {offer.contact.contact_name}", body))
+        elements.append(Spacer(1, 6 * mm))
+
+    elements.append(Paragraph(f"<b>Precio total final:</b> {offer.final_price_eur:,.2f} €", h2))
+    elements.append(Spacer(1, 4 * mm))
+    elements.append(Paragraph(
+        "Esta oferta ha sido generada mediante inteligencia artificial (asistente EPi) "
+        "a partir de los datos aportados. Tiene carácter orientativo y no es vinculante "
+        "hasta su confirmación expresa por parte de Eficiencia y Precisión Industrial S.L.",
+        _ai_disclaimer))
+    elements.append(Spacer(1, 6 * mm))
+
+    elements.append(Paragraph("Bomba recomendada", h2))
+    elements.append(Paragraph(
+        f"{offer.pump.technology.value} — {offer.pump.brand} {offer.pump.model} "
+        f"(perfil {offer.pump.profile.value})", body))
+    elements.append(Paragraph(offer.pump.description, body))
+    if offer.pump.real_efficiency_pct:
+        elements.append(Paragraph(
+            f"Eficiencia real estimada: {offer.pump.real_efficiency_pct:.0f}% "
+            "(calculada a partir del caudal, altura y potencia de catálogo de este "
+            "modelo — no es un valor genérico por tecnología).", body))
+    elements.append(Spacer(1, 6 * mm))
+
+    # NUEVO — por que esta tecnologia y no otra, explicado al cliente (antes
+    # solo iba en el informe interno que se manda al email de EPi).
+    if offer.justification:
+        elements.append(Paragraph("¿Por qué esta tecnología de bomba?", h2))
+        elements.append(Paragraph(offer.justification, body))
+        elements.append(Spacer(1, 4 * mm))
+
+    if offer.compatible_technologies:
+        elements.append(Paragraph("Tecnologías compatibles con su aplicación", h2))
+        _cell_tech = ParagraphStyle("tech_cell", parent=styles["Normal"], fontName="Times-Roman", fontSize=8, leading=10)
+        tdata = [["Tecnología", "Motivo"]]
+        for r in offer.compatible_technologies:
+            motivo = "; ".join(r.reasons) if r.reasons else ("; ".join(r.warnings) if r.warnings else "—")
+            marca = f"{r.technology.value} (recomendada)" if r.technology == offer.pump.technology else r.technology.value
+            tdata.append([Paragraph(marca, _cell_tech), Paragraph(motivo, _cell_tech)])
+        ttable = Table(tdata, colWidths=[55 * mm, 105 * mm])
+        ttable.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), NAVY),
+            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+            ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
+            ("FONTSIZE", (0, 0), (-1, -1), 8),
+            ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ]))
+        elements.append(ttable)
+        elements.append(Spacer(1, 6 * mm))
+
+    elements.append(Paragraph("Parámetros operativos", h2))
+    elements.append(Paragraph(
+        f"Fluido: {offer.fluid_name} · Caudal: {offer.flow_m3h} m3/h · "
+        f"Velocidad: {offer.velocity_ms} m/s · TDH: {offer.tdh_m} m.c.f.", body))
+
+    elements.append(Spacer(1, 4 * mm))
+    try:
+        curve_drawing = build_curve_drawing(
+            offer.pump, operating_flow_m3h=offer.flow_m3h, operating_head_m=offer.tdh_m,
+        )
+        elements.append(curve_drawing)
+        if offer.pump.curve_reference_url:
+            elements.append(Paragraph(
+                f"Curva oficial del fabricante: {offer.pump.curve_reference_url}", body))
+        else:
+            elements.append(Paragraph(
+                "Curva orientativa, calculada a partir del caudal y la altura máximos de "
+                "catálogo de esta bomba (no es la curva exacta publicada por el fabricante).",
+                body))
+    except Exception:
+        pass  # si la generacion de la curva falla, no bloquea el resto de la oferta
+
+    elements.append(Spacer(1, 6 * mm))
+    elements.append(Paragraph(
+        "Precio de la bomba únicamente — no incluye tuberías, válvulas, instalación ni mano "
+        "de obra. Consulte con nosotros si desea ampliar la oferta al resto de la instalación.",
+        body))
+    elements.append(Spacer(1, 4 * mm))
     elements.append(Paragraph(
         "<b>En caso de aceptación del presupuesto</b>, envíe el pedido oficial a "
         "<b>pedidos@eficienciayprecisionindustrial.com</b>. Si no recibe confirmación de "
