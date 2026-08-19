@@ -272,6 +272,11 @@ class SparePartOffer(BaseModel):
     unit_price_eur: float
     final_price_eur: float
     contact: Optional[ContactInfo] = None
+    # NUEVO (agosto 2026): que pieza es y para que bomba/familia de bombas
+    # sirve, cuando se ha podido identificar a partir del catalogo. None
+    # cuando no hay evidencia suficiente en los datos de origen.
+    tipo_componente: Optional[str] = None
+    bomba_compatible: Optional[str] = None
 
 
 class AdhesiveEquipmentItem(BaseModel):
